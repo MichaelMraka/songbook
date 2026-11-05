@@ -1,0 +1,5 @@
+/songbook.app
+/bin/
+*.app
+.DS_Store
+/tmp/
