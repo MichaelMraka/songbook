@@ -62,6 +62,9 @@ var songMenuActions = []string{
 	"Transpose down",
 	"Save transposed",
 	"Edit song…",
+	"Song font size…",
+	"Song font family…",
+	"Reset song font",
 }
 
 var editSongActions = []string{
@@ -141,12 +144,21 @@ func (a *app) applyListFontFromSettings() {
 
 func (a *app) applySongFontFromSettings(songID string) {
 	step := a.state.Settings.SongFontSize
-	if m := a.state.Settings.SongMeta(songID); m.FontSize != "" {
-		step = m.FontSize
+	family := a.state.Settings.FontFamily
+	if m := a.state.Settings.SongMeta(songID); m.FontSize != "" || m.FontFamily != "" {
+		if m.FontSize != "" {
+			step = m.FontSize
+		}
+		if m.FontFamily != "" {
+			family = m.FontFamily
+		}
 	}
+	prevFamily := a.state.Settings.FontFamily
+	a.state.Settings.FontFamily = family
 	a.fontSize = songbook.FontSizePixels(step, defaultFont)
 	a.fontSize = clamp(a.fontSize, minFont, maxFont)
 	a.openFonts()
+	a.state.Settings.FontFamily = prevFamily
 }
 
 // layout returns screen size and vertical bands: tabs | header | content.
@@ -753,6 +765,15 @@ func (a *app) runSongMenuAction(i int) {
 		a.screen = screenSong
 	case "Edit song…":
 		a.startEditSong()
+	case "Song font size…":
+		a.cycleSongMetaFontSize()
+		a.screen = screenSong
+	case "Song font family…":
+		a.cycleSongMetaFontFamily()
+		a.screen = screenSong
+	case "Reset song font":
+		a.resetSongMetaFont()
+		a.screen = screenSong
 	}
 }
 
@@ -832,6 +853,90 @@ func (a *app) changeTranspose(d int) {
 func (a *app) changeFont(d int) {
 	a.fontSize = clamp(a.fontSize+d, minFont, maxFont)
 	a.openFonts()
+	if a.screen == screenSong || a.screen == screenSongMenu {
+		a.persistSongFontSizeFromPixels()
+	}
+}
+
+func (a *app) persistSongFontSizeFromPixels() {
+	step := nearestFontSize(a.fontSize, defaultFont)
+	m := a.state.Settings.SongMeta(a.song.ID)
+	m.FontSize = step
+	if a.state.Settings.Songs == nil {
+		a.state.Settings.Songs = map[string]songbook.SongMeta{}
+	}
+	a.state.Settings.Songs[a.song.ID] = m
+	_ = a.state.saveSettings()
+}
+
+func nearestFontSize(px, base int) songbook.FontSizeStep {
+	best := songbook.FontMedium
+	bestDiff := int(^uint(0) >> 1)
+	for _, step := range []songbook.FontSizeStep{
+		songbook.FontSmallest, songbook.FontSmall, songbook.FontMedium,
+		songbook.FontBig, songbook.FontBigger,
+	} {
+		d := songbook.FontSizePixels(step, base) - px
+		if d < 0 {
+			d = -d
+		}
+		if d < bestDiff {
+			bestDiff = d
+			best = step
+		}
+	}
+	return best
+}
+
+func (a *app) cycleSongMetaFontSize() {
+	m := a.state.Settings.SongMeta(a.song.ID)
+	cur := m.FontSize
+	if cur == "" {
+		cur = a.state.Settings.SongFontSize
+	}
+	m.FontSize = nextFontSize(cur)
+	if a.state.Settings.Songs == nil {
+		a.state.Settings.Songs = map[string]songbook.SongMeta{}
+	}
+	a.state.Settings.Songs[a.song.ID] = m
+	_ = a.state.saveSettings()
+	a.applySongFontFromSettings(a.song.ID)
+	a.status = "Song font: " + string(m.FontSize)
+}
+
+func (a *app) cycleSongMetaFontFamily() {
+	m := a.state.Settings.SongMeta(a.song.ID)
+	if m.FontFamily == "mono" {
+		m.FontFamily = ""
+	} else {
+		m.FontFamily = "mono"
+	}
+	if a.state.Settings.Songs == nil {
+		a.state.Settings.Songs = map[string]songbook.SongMeta{}
+	}
+	a.state.Settings.Songs[a.song.ID] = m
+	_ = a.state.saveSettings()
+	// Temporarily honor per-song family via global openFonts path.
+	prev := a.state.Settings.FontFamily
+	if m.FontFamily != "" {
+		a.state.Settings.FontFamily = m.FontFamily
+	}
+	a.applySongFontFromSettings(a.song.ID)
+	a.state.Settings.FontFamily = prev
+	a.status = "Song font family updated"
+}
+
+func (a *app) resetSongMetaFont() {
+	m := a.state.Settings.SongMeta(a.song.ID)
+	m.FontFamily = ""
+	m.FontSize = ""
+	if a.state.Settings.Songs == nil {
+		a.state.Settings.Songs = map[string]songbook.SongMeta{}
+	}
+	a.state.Settings.Songs[a.song.ID] = m
+	_ = a.state.saveSettings()
+	a.applySongFontFromSettings(a.song.ID)
+	a.status = "Song font reset"
 }
 
 func (a *app) goBack() bool {
