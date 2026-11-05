@@ -50,7 +50,15 @@ const (
 	screenAuthorSongs
 	screenPlaylistSongs
 	screenSong
+	screenSongMenu
 )
+
+var songMenuActions = []string{
+	"Transpose up",
+	"Transpose down",
+	"Save transposed",
+	"Edit song…",
+}
 
 type app struct {
 	state *appState
@@ -210,6 +218,8 @@ func (a *app) Draw() {
 	switch a.screen {
 	case screenSong:
 		a.drawSong(header, content)
+	case screenSongMenu:
+		a.drawActionList(header, content, "Song menu", songMenuActions)
 	case screenAuthorSongs, screenPlaylistSongs:
 		a.drawSongList(header, content, a.ctxTitle)
 	default:
@@ -266,10 +276,22 @@ func (a *app) drawMain(header, list image.Rectangle) {
 }
 
 func (a *app) drawMenuRows(list image.Rectangle, rowH, visible int) {
+	a.drawStringRows(list, rowH, visible, a.menuLabels())
+}
+
+func (a *app) drawActionList(header, list image.Rectangle, title string, items []string) {
+	a.font.SetActive(ink.Black)
+	ink.DrawString(image.Pt(12, header.Min.Y+6), title)
+	ink.DrawLine(image.Pt(0, header.Max.Y-1), image.Pt(header.Max.X, header.Max.Y-1), ink.Black)
+	rowH := a.fontSize + 12
+	visible := max(1, list.Dy()/rowH)
+	a.drawStringRows(list, rowH, visible, items)
+}
+
+func (a *app) drawStringRows(list image.Rectangle, rowH, visible int, items []string) {
 	a.font.SetActive(ink.Black)
 	ink.SetClip(list)
 	defer ink.SetClip(ink.Screen())
-	items := a.menuLabels()
 	if a.sel < a.scroll {
 		a.scroll = a.sel
 	}
@@ -494,7 +516,14 @@ func (a *app) Key(e ink.KeyEvent) bool {
 			return true
 		}
 	case ink.KeyMenu:
-		a.openSearch()
+		if a.screen == screenSong {
+			a.openSongMenu()
+		} else if a.screen == screenSongMenu {
+			a.screen = screenSong
+			ink.Repaint()
+		} else {
+			a.openSearch()
+		}
 		return true
 	}
 	return false
@@ -506,6 +535,13 @@ func (a *app) openSearch() {
 	a.ctxTitle = ""
 	a.refreshList()
 	ink.OpenKeyboard(a.filter, 128)
+}
+
+func (a *app) openSongMenu() {
+	a.sel = 0
+	a.scroll = 0
+	a.screen = screenSongMenu
+	ink.Repaint()
 }
 
 func (a *app) toggleFulltextSearch() {
@@ -547,6 +583,14 @@ func (a *app) Pointer(e ink.PointerEvent) bool {
 		return true
 	}
 	rowH := a.fontSize + 12
+	if a.screen == screenSongMenu {
+		if e.Y >= list.Min.Y {
+			a.sel = a.scroll + (e.Y-list.Min.Y)/rowH
+			a.activate()
+			ink.Repaint()
+		}
+		return true
+	}
 	if e.Y < list.Min.Y {
 		if a.screen == screenList && a.tab == tabSearch && e.Y >= header.Min.Y {
 			// Right third of header toggles fulltext; left opens keyboard.
@@ -593,6 +637,8 @@ func (a *app) listLen() int {
 	switch a.screen {
 	case screenSong:
 		return len(a.lines)
+	case screenSongMenu:
+		return len(songMenuActions)
 	case screenAuthorSongs, screenPlaylistSongs:
 		return len(a.songs)
 	default:
@@ -651,11 +697,57 @@ func (a *app) activate() {
 		case tabMenu:
 			a.runMenuAction(a.sel)
 		}
+	case screenSongMenu:
+		a.runSongMenuAction(a.sel)
 	case screenAuthorSongs, screenPlaylistSongs:
 		if a.sel >= 0 && a.sel < len(a.songs) {
 			a.openSong(a.songs[a.sel])
 		}
 	}
+}
+
+func (a *app) runSongMenuAction(i int) {
+	if i < 0 || i >= len(songMenuActions) {
+		return
+	}
+	switch songMenuActions[i] {
+	case "Transpose up":
+		a.changeTranspose(1)
+		a.screen = screenSong
+	case "Transpose down":
+		a.changeTranspose(-1)
+		a.screen = screenSong
+	case "Save transposed":
+		a.saveTransposed()
+		a.screen = screenSong
+	case "Edit song…":
+		a.startEditSong()
+	}
+}
+
+func (a *app) saveTransposed() {
+	if a.transpose == 0 {
+		ink.Message(ink.Info, "Save transposed", "Nothing to save (offset 0).", 0)
+		return
+	}
+	s := a.song
+	s.Text = songbook.TransposeSongtext(s.Text, a.transpose)
+	s.Step += a.transpose
+	if err := a.state.upsertSong(s); err != nil {
+		ink.Message(ink.Error, "Save transposed", err.Error(), 0)
+		return
+	}
+	a.song = s
+	a.transpose = 0
+	a.rebuildSongLines()
+	a.status = "Transposition saved"
+	ink.Message(ink.Info, "Save transposed", a.status, 0)
+}
+
+func (a *app) startEditSong() {
+	// Wired in the Edit song feature; placeholder keeps menu index stable.
+	ink.Message(ink.Info, "Edit song", "Coming next.", 0)
+	a.screen = screenSong
 }
 
 func (a *app) openSong(s songbook.Song) {
@@ -684,6 +776,10 @@ func (a *app) changeFont(d int) {
 
 func (a *app) goBack() bool {
 	switch a.screen {
+	case screenSongMenu:
+		a.screen = screenSong
+		ink.Repaint()
+		return true
 	case screenSong:
 		a.screen = a.fromScreen
 		a.applyListFontFromSettings()
