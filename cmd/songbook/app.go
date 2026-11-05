@@ -20,7 +20,7 @@ const (
 	minFont     = 27
 	maxFont     = 72
 	defaultFont = 39 // ~1.5× previous 26
-	tabCount    = 4
+	tabCount    = 5
 )
 
 type tab int
@@ -30,7 +30,13 @@ const (
 	tabSongs
 	tabAuthors
 	tabPlaylists
+	tabMenu
 )
+
+// Menu tab actions (extend as features land).
+var menuActions = []string{
+	"Import library…",
+}
 
 type screen int
 
@@ -210,6 +216,9 @@ func (a *app) drawMain(header, list image.Rectangle) {
 		title = "Authors"
 	case tabPlaylists:
 		title = "Playlists"
+	case tabMenu:
+		title = "Menu"
+		status = "Actions"
 	}
 	ink.DrawString(image.Pt(12, header.Min.Y+6), title)
 	if status != "" {
@@ -226,6 +235,32 @@ func (a *app) drawMain(header, list image.Rectangle) {
 		a.drawAuthorRows(list, rowH, visible)
 	case tabPlaylists:
 		a.drawPlaylistRows(list, rowH, visible)
+	case tabMenu:
+		a.drawMenuRows(list, rowH, visible)
+	}
+}
+
+func (a *app) drawMenuRows(list image.Rectangle, rowH, visible int) {
+	a.font.SetActive(ink.Black)
+	ink.SetClip(list)
+	defer ink.SetClip(ink.Screen())
+	items := menuActions
+	if a.sel < a.scroll {
+		a.scroll = a.sel
+	}
+	if a.sel >= a.scroll+visible {
+		a.scroll = a.sel - visible + 1
+	}
+	end := min(len(items), a.scroll+visible)
+	for i := a.scroll; i < end; i++ {
+		y := list.Min.Y + (i-a.scroll)*rowH
+		if y+rowH > list.Max.Y {
+			break
+		}
+		if i == a.sel {
+			ink.FillArea(image.Rect(list.Min.X, y, list.Max.X, min(y+rowH, list.Max.Y)), ink.LightGray)
+		}
+		ink.DrawString(image.Pt(12, y+2), truncate(items[i], list.Dx()-24))
 	}
 }
 
@@ -351,7 +386,7 @@ func (a *app) drawSong(header, body image.Rectangle) {
 
 func (a *app) drawTabs(r image.Rectangle) {
 	ink.DrawLine(image.Pt(r.Min.X, r.Min.Y), image.Pt(r.Max.X, r.Min.Y), ink.Black)
-	labels := []string{"Search", "Songs", "Authors", "Playlists"}
+	labels := []string{"Search", "Songs", "Authors", "Lists", "Menu"}
 	w := r.Dx() / len(labels)
 	a.font.SetActive(ink.Black)
 	for i, lab := range labels {
@@ -360,7 +395,7 @@ func (a *app) drawTabs(r image.Rectangle) {
 		if tab(i) == a.tab && a.screen != screenSong {
 			ink.FillArea(cell, ink.LightGray)
 		}
-		ink.DrawString(image.Pt(x0+8, r.Min.Y+(r.Dy()-a.fontSize)/2), lab)
+		ink.DrawString(image.Pt(x0+6, r.Min.Y+(r.Dy()-a.fontSize)/2), lab)
 	}
 }
 
@@ -492,6 +527,8 @@ func (a *app) listLen() int {
 			return len(a.authors)
 		case tabPlaylists:
 			return len(a.playlists)
+		case tabMenu:
+			return len(menuActions)
 		}
 	}
 	return 0
@@ -535,6 +572,8 @@ func (a *app) activate() {
 				a.sel = 0
 				a.scroll = 0
 			}
+		case tabMenu:
+			a.runMenuAction(a.sel)
 		}
 	case screenAuthorSongs, screenPlaylistSongs:
 		if a.sel >= 0 && a.sel < len(a.songs) {
@@ -610,17 +649,31 @@ func (a *app) setTab(t tab) {
 	a.status = fmt.Sprintf("%d songs", a.state.Lib.SongCount())
 }
 
-func (a *app) openMenu() {
-	// Pending Menu-tab UX: Import stays here for now; HW Menu will later open Search.
+func (a *app) runMenuAction(i int) {
+	if i < 0 || i >= len(menuActions) {
+		return
+	}
+	switch menuActions[i] {
+	case "Import library…":
+		a.promptImportMode()
+	}
+}
+
+func (a *app) promptImportMode() {
 	ink.SetDialogHandler(func(button int) {
 		if button == 1 {
-			a.doImport(true) // replace
+			a.doImport(true)
 		} else if button == 2 {
-			a.doImport(false) // merge
+			a.doImport(false)
 		}
 		ink.Repaint()
 	})
 	ink.Dialog(ink.Question, "Import", "Replace library or merge with current songs?", "Replace", "Merge")
+}
+
+func (a *app) openMenu() {
+	// Temporary: HW Menu still opens import until Search wiring lands.
+	a.promptImportMode()
 }
 
 func (a *app) doImport(replace bool) {

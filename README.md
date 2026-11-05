@@ -5,7 +5,7 @@ Offline songbook for PocketBook InkPad 3 Pro (**PB740**) compatible with [Karel 
 ## Features (v1)
 
 - Import Zpěvník XML library
-- **Search / Songs / Authors / Playlists** browsing
+- **Search / Songs / Authors / Lists / Menu** browsing
 - Offline search (title/author, diacritics-insensitive)
 - Song view with chords above lyrics, transpose, font size, scroll
 
