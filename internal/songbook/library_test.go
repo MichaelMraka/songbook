@@ -64,7 +64,7 @@ func TestSearchWabi(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFile: %v", err)
 	}
-	hits := lib.Search("wabi")
+	hits := lib.Search("wabi", songbook.SearchOptions{})
 	if len(hits) < 10 {
 		t.Fatalf("Search(wabi) got %d hits, want at least 10", len(hits))
 	}
@@ -85,7 +85,7 @@ func TestSearchDiacritics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFile: %v", err)
 	}
-	hits := lib.Search("carpe")
+	hits := lib.Search("carpe", songbook.SearchOptions{})
 	found := false
 	for _, s := range hits {
 		if s.Title == "Carpe diem" {
@@ -95,6 +95,32 @@ func TestSearchDiacritics(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("expected Carpe diem")
+	}
+}
+
+func TestSearchFulltext(t *testing.T) {
+	lib, err := songbook.LoadFile(testExportPath(t))
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	// Phrase unique to Carpe diem lyrics, not in title/author.
+	q := "neuroním"
+	if n := len(lib.Search(q, songbook.SearchOptions{})); n != 0 {
+		t.Fatalf("without fulltext expected 0, got %d", n)
+	}
+	hits := lib.Search(q, songbook.SearchOptions{Fulltext: true})
+	if len(hits) == 0 {
+		t.Fatal("expected fulltext hit")
+	}
+}
+
+func TestSongsSortedByTitle(t *testing.T) {
+	lib := songbook.NewEmpty()
+	_ = lib.Upsert(songbook.Song{ID: "1", Title: "Zebra", Author: "A"})
+	_ = lib.Upsert(songbook.Song{ID: "2", Title: "Alpha", Author: "Z"})
+	got := lib.SongsSorted(songbook.SortBySongName, nil)
+	if got[0].Title != "Alpha" || got[1].Title != "Zebra" {
+		t.Fatalf("%v %v", got[0].Title, got[1].Title)
 	}
 }
 

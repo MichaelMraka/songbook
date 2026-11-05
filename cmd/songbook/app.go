@@ -5,7 +5,6 @@ package main
 import (
 	"fmt"
 	"image"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,13 +15,12 @@ import (
 )
 
 const (
-	defaultLibraryPath = ink.FlashDir + "/songbook/library.xml"
-	tabH               = 72
-	headerH            = 96
-	minFont            = 27
-	maxFont            = 72
-	defaultFont        = 39 // ~1.5× previous 26
-	tabCount           = 4
+	tabH        = 72
+	headerH     = 96
+	minFont     = 27
+	maxFont     = 72
+	defaultFont = 39 // ~1.5× previous 26
+	tabCount    = 4
 )
 
 type tab int
@@ -44,7 +42,7 @@ const (
 )
 
 type app struct {
-	lib *songbook.Library
+	state *appState
 
 	screen screen
 	tab    tab
@@ -72,6 +70,7 @@ type app struct {
 
 func newApp() *app {
 	return &app{
+		state:    newAppState(),
 		fontSize: defaultFont,
 		tab:      tabSearch,
 		screen:   screenList,
@@ -85,12 +84,34 @@ func (a *app) Init() error {
 	setPanelType(0) // fullscreen; we draw our own top tabs
 	a.openFonts()
 	ink.SetKeyboardHandler(a.onKeyboard)
-	if err := a.loadLibrary(defaultLibraryPath); err != nil {
-		a.status = "No library. Place XML at " + defaultLibraryPath + " or tap Import."
-		a.lib = &songbook.Library{}
+	if err := a.state.load(); err != nil {
+		a.status = "No library. Place XML at " + a.state.LibraryPath + " or tap Import."
+		// settings may still have loaded; library empty
+		if a.state.Lib == nil {
+			a.state.Lib = songbook.NewEmpty()
+		}
+	} else {
+		a.status = fmt.Sprintf("%d songs", a.state.Lib.SongCount())
+		a.applyListFontFromSettings()
 	}
 	a.refreshList()
 	return nil
+}
+
+func (a *app) applyListFontFromSettings() {
+	a.fontSize = songbook.FontSizePixels(a.state.Settings.ListFontSize, defaultFont)
+	a.fontSize = clamp(a.fontSize, minFont, maxFont)
+	a.openFonts()
+}
+
+func (a *app) applySongFontFromSettings(songID string) {
+	step := a.state.Settings.SongFontSize
+	if m := a.state.Settings.SongMeta(songID); m.FontSize != "" {
+		step = m.FontSize
+	}
+	a.fontSize = songbook.FontSizePixels(step, defaultFont)
+	a.fontSize = clamp(a.fontSize, minFont, maxFont)
+	a.openFonts()
 }
 
 // layout returns screen size and vertical bands: tabs | header | content.
@@ -124,25 +145,16 @@ func (a *app) openFonts() {
 	a.mono = ink.OpenFont(ink.DefaultFontMono, a.fontSize, true)
 }
 
-func (a *app) loadLibrary(path string) error {
-	lib, err := songbook.LoadFile(path)
-	if err != nil {
-		return err
-	}
-	a.lib = lib
-	a.status = fmt.Sprintf("%d songs", lib.SongCount())
-	return nil
-}
-
 func (a *app) refreshList() {
-	if a.lib == nil {
+	lib := a.state.Lib
+	if lib == nil {
 		a.songs = nil
 		a.authors = nil
 		a.playlists = nil
 		return
 	}
-	a.authors = a.lib.Authors()
-	a.playlists = a.lib.Playlists()
+	a.authors = lib.Authors()
+	a.playlists = lib.Playlists()
 	switch a.screen {
 	case screenList:
 		switch a.tab {
@@ -150,10 +162,12 @@ func (a *app) refreshList() {
 			if a.filter == "" {
 				a.songs = nil
 			} else {
-				a.songs = a.lib.Search(a.filter)
+				a.songs = lib.Search(a.filter, songbook.SearchOptions{
+					Fulltext: a.state.Settings.SearchFulltext,
+				})
 			}
 		case tabSongs:
-			a.songs = a.lib.Songs()
+			a.songs = lib.SongsSorted(a.state.Settings.Sort, a.state.Settings.Songs)
 		}
 	}
 	a.scroll = 0
@@ -302,7 +316,7 @@ func (a *app) drawPlaylistRows(list image.Rectangle, rowH, visible int) {
 		if y+rowH > list.Max.Y {
 			break
 		}
-		n := len(a.lib.PlaylistSongs(items[i].ID))
+		n := len(a.state.Lib.PlaylistSongs(items[i].ID))
 		label := fmt.Sprintf("%s  (%d)", items[i].Title, n)
 		if i == a.sel {
 			ink.FillArea(image.Rect(list.Min.X, y, list.Max.X, min(y+rowH, list.Max.Y)), ink.LightGray)
@@ -506,7 +520,7 @@ func (a *app) activate() {
 		case tabAuthors:
 			if a.sel >= 0 && a.sel < len(a.authors) {
 				au := a.authors[a.sel]
-				a.songs = a.lib.SongsByAuthor(au.Name)
+				a.songs = a.state.Lib.SongsByAuthor(au.Name)
 				a.ctxTitle = fmt.Sprintf("%s (%d)", au.Name, au.Count)
 				a.screen = screenAuthorSongs
 				a.sel = 0
@@ -515,7 +529,7 @@ func (a *app) activate() {
 		case tabPlaylists:
 			if a.sel >= 0 && a.sel < len(a.playlists) {
 				pl := a.playlists[a.sel]
-				a.songs = a.lib.PlaylistSongs(pl.ID)
+				a.songs = a.state.Lib.PlaylistSongs(pl.ID)
 				a.ctxTitle = fmt.Sprintf("%s (%d)", pl.Title, len(a.songs))
 				a.screen = screenPlaylistSongs
 				a.sel = 0
@@ -534,6 +548,7 @@ func (a *app) openSong(s songbook.Song) {
 	a.song = s
 	a.transpose = 0
 	a.songScroll = 0
+	a.applySongFontFromSettings(s.ID)
 	a.rebuildSongLines()
 	a.screen = screenSong
 }
@@ -556,6 +571,7 @@ func (a *app) goBack() bool {
 	switch a.screen {
 	case screenSong:
 		a.screen = a.fromScreen
+		a.applyListFontFromSettings()
 		ink.Repaint()
 		return true
 	case screenAuthorSongs, screenPlaylistSongs:
@@ -591,24 +607,27 @@ func (a *app) setTab(t tab) {
 	a.refreshList()
 	a.sel = 0
 	a.scroll = 0
-	a.status = fmt.Sprintf("%d songs", a.lib.SongCount())
+	a.status = fmt.Sprintf("%d songs", a.state.Lib.SongCount())
 }
 
 func (a *app) openMenu() {
+	// Pending Menu-tab UX: Import stays here for now; HW Menu will later open Search.
 	ink.SetDialogHandler(func(button int) {
 		if button == 1 {
-			a.doImport()
+			a.doImport(true) // replace
+		} else if button == 2 {
+			a.doImport(false) // merge
 		}
 		ink.Repaint()
 	})
-	ink.Dialog(ink.Question, "Songbook", "Import library XML from /mnt/ext1/songbook/?", "Import", "Cancel")
+	ink.Dialog(ink.Question, "Import", "Replace library or merge with current songs?", "Replace", "Merge")
 }
 
-func (a *app) doImport() {
+func (a *app) doImport(replace bool) {
 	candidates := []string{
-		ink.FlashDir + "/songbook/import.xml",
-		ink.FlashDir + "/songbook/export.zpk.xml",
-		ink.FlashDir + "/songbook/export.xml",
+		filepath.Join(songbookDir, "import.xml"),
+		filepath.Join(songbookDir, "export.zpk.xml"),
+		filepath.Join(songbookDir, "export.xml"),
 		ink.FlashDir + "/export.zpk.xml",
 	}
 	var src string
@@ -623,41 +642,30 @@ func (a *app) doImport() {
 		ink.Message(ink.Warning, "Import", a.status, 0)
 		return
 	}
-	if err := os.MkdirAll(filepath.Dir(defaultLibraryPath), 0o755); err != nil {
-		a.status = err.Error()
-		return
-	}
-	if err := copyFile(src, defaultLibraryPath); err != nil {
+	incoming, err := songbook.LoadFile(src)
+	if err != nil {
 		a.status = err.Error()
 		ink.Message(ink.Error, "Import", err.Error(), 0)
 		return
 	}
-	if err := a.loadLibrary(defaultLibraryPath); err != nil {
+	if replace {
+		err = a.state.replaceLibrary(incoming)
+	} else {
+		err = a.state.mergeLibrary(incoming)
+	}
+	if err != nil {
 		a.status = err.Error()
 		ink.Message(ink.Error, "Import", err.Error(), 0)
 		return
 	}
 	a.screen = screenList
 	a.refreshList()
-	a.status = fmt.Sprintf("Imported %d songs", a.lib.SongCount())
+	mode := "Merged"
+	if replace {
+		mode = "Replaced"
+	}
+	a.status = fmt.Sprintf("%s: %d songs", mode, a.state.Lib.SongCount())
 	ink.Message(ink.Info, "Import", a.status, 0)
-}
-
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-	if _, err := io.Copy(out, in); err != nil {
-		return err
-	}
-	return out.Close()
 }
 
 func truncate(s string, maxPx int) string {

@@ -130,6 +130,36 @@ var rootAliases = map[string]int{
 	"Cb": 11, "Hb": 10, // Hb ~ B flat in some Czech tabs
 }
 
+// TransposeSongtext rewrites every [chord] token in songtext by semitones.
+func TransposeSongtext(songtext string, semitones int) string {
+	if semitones == 0 || songtext == "" {
+		return songtext
+	}
+	var b strings.Builder
+	b.Grow(len(songtext))
+	rest := songtext
+	for len(rest) > 0 {
+		start := strings.IndexByte(rest, '[')
+		if start < 0 {
+			b.WriteString(rest)
+			break
+		}
+		b.WriteString(rest[:start])
+		end := strings.IndexByte(rest[start:], ']')
+		if end < 0 {
+			b.WriteString(rest[start:])
+			break
+		}
+		end += start
+		chord := rest[start+1 : end]
+		b.WriteByte('[')
+		b.WriteString(TransposeChord(chord, semitones))
+		b.WriteByte(']')
+		rest = rest[end+1:]
+	}
+	return b.String()
+}
+
 // TransposeChord shifts a chord name by semitones. Empty/invalid chords pass through.
 func TransposeChord(chord string, semitones int) string {
 	chord = strings.TrimSpace(chord)

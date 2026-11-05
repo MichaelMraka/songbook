@@ -215,8 +215,14 @@ func (l *Library) SongsByAuthor(author string) []Song {
 	return out
 }
 
+// SearchOptions controls Search behavior.
+type SearchOptions struct {
+	Fulltext bool // also match songtext
+}
+
 // Search filters songs by title or author (diacritics-insensitive).
-func (l *Library) Search(query string) []Song {
+// When opts.Fulltext is set, songtext is searched too.
+func (l *Library) Search(query string, opts SearchOptions) []Song {
 	if l == nil {
 		return nil
 	}
@@ -228,9 +234,62 @@ func (l *Library) Search(query string) []Song {
 	for _, s := range l.songs {
 		if strings.Contains(fold(s.Title), q) || strings.Contains(fold(s.Author), q) {
 			out = append(out, s)
+			continue
+		}
+		if opts.Fulltext && strings.Contains(fold(s.Text), q) {
+			out = append(out, s)
 		}
 	}
 	return out
+}
+
+// SongsSorted returns songs ordered by mode. meta supplies local created/updated.
+func (l *Library) SongsSorted(mode SortMode, meta map[string]SongMeta) []Song {
+	if l == nil {
+		return nil
+	}
+	out := l.Songs()
+	switch mode {
+	case SortBySongName:
+		sort.SliceStable(out, func(i, j int) bool {
+			return fold(out[i].Title+"\x00"+out[i].Author) < fold(out[j].Title+"\x00"+out[j].Author)
+		})
+	case SortByUpdated:
+		sort.SliceStable(out, func(i, j int) bool {
+			ui, uj := metaTime(meta, out[i].ID, true), metaTime(meta, out[j].ID, true)
+			if ui != uj {
+				return ui > uj
+			}
+			return fold(out[i].Author+"\x00"+out[i].Title) < fold(out[j].Author+"\x00"+out[j].Title)
+		})
+	case SortByCreated:
+		sort.SliceStable(out, func(i, j int) bool {
+			ci, cj := metaTime(meta, out[i].ID, false), metaTime(meta, out[j].ID, false)
+			if ci != cj {
+				return ci > cj
+			}
+			return fold(out[i].Author+"\x00"+out[i].Title) < fold(out[j].Author+"\x00"+out[j].Title)
+		})
+	default: // SortByAuthorName
+		sort.SliceStable(out, func(i, j int) bool {
+			return fold(out[i].Author+"\x00"+out[i].Title) < fold(out[j].Author+"\x00"+out[j].Title)
+		})
+	}
+	return out
+}
+
+func metaTime(meta map[string]SongMeta, id string, updated bool) int64 {
+	if meta == nil {
+		return 0
+	}
+	m, ok := meta[id]
+	if !ok {
+		return 0
+	}
+	if updated {
+		return m.LocalUpdated
+	}
+	return m.LocalCreated
 }
 
 // DisplayLabel returns "Author - Title".

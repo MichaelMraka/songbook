@@ -80,3 +80,14 @@ func TestEmptyAndMultiline(t *testing.T) {
 		t.Fatalf("got %d lines, want >= 3", len(lines))
 	}
 }
+
+func TestTransposeSongtext(t *testing.T) {
+	in := "[C]hello [Ami]there"
+	got := songbook.TransposeSongtext(in, 2)
+	if got != "[D]hello [Hmi]there" {
+		t.Fatalf("got %q", got)
+	}
+	if songbook.TransposeSongtext(in, 0) != in {
+		t.Fatal("zero should be identity")
+	}
+}

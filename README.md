@@ -47,9 +47,10 @@ On the device, internal storage is `/mnt/ext1`. Over USB that same volume appear
    ```text
    applications/songbook.app
    songbook/library.xml          # preferred; app reads /mnt/ext1/songbook/library.xml
+   songbook/settings.json        # created automatically (fonts, sort, per-song prefs)
    ```
 
-   Or drop the export as one of `songbook/import.xml`, `songbook/export.zpk.xml`, or `songbook/export.xml`, then use **Menu → Import** in the app (copies into `library.xml`).
+   Or drop the export as one of `songbook/import.xml`, `songbook/export.zpk.xml`, or `songbook/export.xml`, then use **Menu → Import** (Replace or Merge into `library.xml`).
 
 4. Eject/unmount safely, then open **Applications → songbook** on the device.
 
