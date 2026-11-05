@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"image"
+	"image/color"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -34,12 +35,6 @@ const (
 	tabPlaylists
 	tabMenu
 )
-
-// Menu tab actions (extend as features land).
-var menuActions = []string{
-	"Import library…",
-	"Random song",
-}
 
 type keyboardMode int
 
@@ -82,6 +77,7 @@ type app struct {
 	status string
 	font   *ink.Font
 	mono   *ink.Font
+	bold   *ink.Font
 
 	kbMode            keyboardMode
 	pendingImportPath string
@@ -151,6 +147,9 @@ func (a *app) Close() error {
 	if a.mono != nil {
 		a.mono.Close()
 	}
+	if a.bold != nil {
+		a.bold.Close()
+	}
 	return nil
 }
 
@@ -161,8 +160,16 @@ func (a *app) openFonts() {
 	if a.mono != nil {
 		a.mono.Close()
 	}
-	a.font = ink.OpenFont(ink.DefaultFont, a.fontSize, true)
+	if a.bold != nil {
+		a.bold.Close()
+	}
+	face := ink.DefaultFont
+	if a.state != nil && a.state.Settings.FontFamily == "mono" {
+		face = ink.DefaultFontMono
+	}
+	a.font = ink.OpenFont(face, a.fontSize, true)
 	a.mono = ink.OpenFont(ink.DefaultFontMono, a.fontSize, true)
+	a.bold = ink.OpenFont(ink.DefaultFontBold, a.fontSize, true)
 }
 
 func (a *app) refreshList() {
@@ -262,7 +269,7 @@ func (a *app) drawMenuRows(list image.Rectangle, rowH, visible int) {
 	a.font.SetActive(ink.Black)
 	ink.SetClip(list)
 	defer ink.SetClip(ink.Screen())
-	items := menuActions
+	items := a.menuLabels()
 	if a.sel < a.scroll {
 		a.scroll = a.sel
 	}
@@ -390,16 +397,36 @@ func (a *app) drawSong(header, body image.Rectangle) {
 	defer ink.SetClip(ink.Screen())
 	y := body.Min.Y + 4
 	lineH := a.fontSize + 6
-	if a.mono != nil {
-		a.mono.SetActive(ink.Black)
-	}
 	for i := a.songScroll; i < len(a.lines); i++ {
 		if y+lineH > body.Max.Y {
 			break
 		}
-		ink.DrawString(image.Pt(12, y), truncate(a.lines[i].Text, body.Dx()-24))
+		line := a.lines[i]
+		a.setSongLineStyle(line.Kind)
+		ink.DrawString(image.Pt(12, y), truncate(line.Text, body.Dx()-24))
 		y += lineH
 	}
+}
+
+func (a *app) setSongLineStyle(kind songbook.LineKind) {
+	var cl color.Color = ink.Black
+	switch a.state.Settings.ChordColor {
+	case songbook.ChordColorYellow, songbook.ChordColorGreen:
+		cl = ink.DarkGray // e-ink stand-in for named colors
+	case songbook.ChordColorRed:
+		cl = ink.Black
+	}
+	if kind == songbook.LineChord {
+		if a.state.Settings.ChordHighlight == songbook.ChordHighlightBold && a.bold != nil {
+			a.bold.SetActive(cl)
+			return
+		}
+		if a.mono != nil {
+			a.mono.SetActive(cl)
+			return
+		}
+	}
+	a.font.SetActive(ink.Black)
 }
 
 func (a *app) drawTabs(r image.Rectangle) {
@@ -577,7 +604,7 @@ func (a *app) listLen() int {
 		case tabPlaylists:
 			return len(a.playlists)
 		case tabMenu:
-			return len(menuActions)
+			return len(a.menuLabels())
 		}
 	}
 	return 0
@@ -696,18 +723,6 @@ func (a *app) setTab(t tab) {
 	a.sel = 0
 	a.scroll = 0
 	a.status = fmt.Sprintf("%d songs", a.state.Lib.SongCount())
-}
-
-func (a *app) runMenuAction(i int) {
-	if i < 0 || i >= len(menuActions) {
-		return
-	}
-	switch menuActions[i] {
-	case "Import library…":
-		a.promptImportFilename()
-	case "Random song":
-		a.openRandomSong()
-	}
 }
 
 func (a *app) promptImportFilename() {
