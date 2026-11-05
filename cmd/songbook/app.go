@@ -41,6 +41,13 @@ var menuActions = []string{
 	"Random song",
 }
 
+type keyboardMode int
+
+const (
+	kbSearch keyboardMode = iota
+	kbImportFile
+)
+
 type screen int
 
 const (
@@ -75,6 +82,9 @@ type app struct {
 	status string
 	font   *ink.Font
 	mono   *ink.Font
+
+	kbMode            keyboardMode
+	pendingImportPath string
 }
 
 func newApp() *app {
@@ -538,10 +548,17 @@ func (a *app) Orientation(o ink.Orientation) bool {
 }
 
 func (a *app) onKeyboard(text string) {
-	a.filter = strings.TrimSpace(text)
-	a.screen = screenList
-	a.tab = tabSearch
-	a.refreshList()
+	text = strings.TrimSpace(text)
+	switch a.kbMode {
+	case kbImportFile:
+		a.kbMode = kbSearch
+		a.onImportFilename(text)
+	default:
+		a.filter = text
+		a.screen = screenList
+		a.tab = tabSearch
+		a.refreshList()
+	}
 	ink.Repaint()
 }
 
@@ -687,10 +704,33 @@ func (a *app) runMenuAction(i int) {
 	}
 	switch menuActions[i] {
 	case "Import library…":
-		a.promptImportMode()
+		a.promptImportFilename()
 	case "Random song":
 		a.openRandomSong()
 	}
+}
+
+func (a *app) promptImportFilename() {
+	a.kbMode = kbImportFile
+	ink.OpenKeyboard("export.zpk.xml", 256)
+}
+
+func (a *app) onImportFilename(name string) {
+	if name == "" {
+		a.status = "Import cancelled"
+		return
+	}
+	path := name
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(songbookDir, path)
+	}
+	if st, err := os.Stat(path); err != nil || st.IsDir() {
+		a.status = "File not found: " + path
+		ink.Message(ink.Warning, "Import", a.status, 0)
+		return
+	}
+	a.pendingImportPath = path
+	a.promptImportMode()
 }
 
 func (a *app) openRandomSong() {
@@ -715,21 +755,10 @@ func (a *app) promptImportMode() {
 }
 
 func (a *app) doImport(replace bool) {
-	candidates := []string{
-		filepath.Join(songbookDir, "import.xml"),
-		filepath.Join(songbookDir, "export.zpk.xml"),
-		filepath.Join(songbookDir, "export.xml"),
-		ink.FlashDir + "/export.zpk.xml",
-	}
-	var src string
-	for _, c := range candidates {
-		if st, err := os.Stat(c); err == nil && !st.IsDir() {
-			src = c
-			break
-		}
-	}
+	src := a.pendingImportPath
+	a.pendingImportPath = ""
 	if src == "" {
-		a.status = "No import file found under /mnt/ext1/songbook/"
+		a.status = "No import file selected"
 		ink.Message(ink.Warning, "Import", a.status, 0)
 		return
 	}
