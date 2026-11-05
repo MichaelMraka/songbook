@@ -41,6 +41,9 @@ type keyboardMode int
 const (
 	kbSearch keyboardMode = iota
 	kbImportFile
+	kbEditAuthor
+	kbEditTitle
+	kbEditText
 )
 
 type screen int
@@ -51,6 +54,7 @@ const (
 	screenPlaylistSongs
 	screenSong
 	screenSongMenu
+	screenEditSong
 )
 
 var songMenuActions = []string{
@@ -58,6 +62,13 @@ var songMenuActions = []string{
 	"Transpose down",
 	"Save transposed",
 	"Edit song…",
+}
+
+var editSongActions = []string{
+	"Edit author",
+	"Edit title",
+	"Edit song text",
+	"Done",
 }
 
 type app struct {
@@ -220,6 +231,8 @@ func (a *app) Draw() {
 		a.drawSong(header, content)
 	case screenSongMenu:
 		a.drawActionList(header, content, "Song menu", songMenuActions)
+	case screenEditSong:
+		a.drawActionList(header, content, "Edit: "+a.song.Title, editSongActions)
 	case screenAuthorSongs, screenPlaylistSongs:
 		a.drawSongList(header, content, a.ctxTitle)
 	default:
@@ -518,7 +531,7 @@ func (a *app) Key(e ink.KeyEvent) bool {
 	case ink.KeyMenu:
 		if a.screen == screenSong {
 			a.openSongMenu()
-		} else if a.screen == screenSongMenu {
+		} else if a.screen == screenSongMenu || a.screen == screenEditSong {
 			a.screen = screenSong
 			ink.Repaint()
 		} else {
@@ -583,7 +596,7 @@ func (a *app) Pointer(e ink.PointerEvent) bool {
 		return true
 	}
 	rowH := a.fontSize + 12
-	if a.screen == screenSongMenu {
+	if a.screen == screenSongMenu || a.screen == screenEditSong {
 		if e.Y >= list.Min.Y {
 			a.sel = a.scroll + (e.Y-list.Min.Y)/rowH
 			a.activate()
@@ -619,13 +632,27 @@ func (a *app) Orientation(o ink.Orientation) bool {
 }
 
 func (a *app) onKeyboard(text string) {
-	text = strings.TrimSpace(text)
-	switch a.kbMode {
+	mode := a.kbMode
+	a.kbMode = kbSearch
+	switch mode {
 	case kbImportFile:
-		a.kbMode = kbSearch
-		a.onImportFilename(text)
+		a.onImportFilename(strings.TrimSpace(text))
+	case kbEditAuthor:
+		a.song.Author = strings.TrimSpace(text)
+		a.saveSongEdits()
+		a.screen = screenEditSong
+	case kbEditTitle:
+		a.song.Title = strings.TrimSpace(text)
+		a.saveSongEdits()
+		a.screen = screenEditSong
+	case kbEditText:
+		// Preserve internal whitespace; only trim outer newlines.
+		a.song.Text = strings.Trim(text, "\r\n")
+		a.saveSongEdits()
+		a.rebuildSongLines()
+		a.screen = screenEditSong
 	default:
-		a.filter = text
+		a.filter = strings.TrimSpace(text)
 		a.screen = screenList
 		a.tab = tabSearch
 		a.refreshList()
@@ -639,6 +666,8 @@ func (a *app) listLen() int {
 		return len(a.lines)
 	case screenSongMenu:
 		return len(songMenuActions)
+	case screenEditSong:
+		return len(editSongActions)
 	case screenAuthorSongs, screenPlaylistSongs:
 		return len(a.songs)
 	default:
@@ -699,6 +728,8 @@ func (a *app) activate() {
 		}
 	case screenSongMenu:
 		a.runSongMenuAction(a.sel)
+	case screenEditSong:
+		a.runEditSongAction(a.sel)
 	case screenAuthorSongs, screenPlaylistSongs:
 		if a.sel >= 0 && a.sel < len(a.songs) {
 			a.openSong(a.songs[a.sel])
@@ -745,9 +776,38 @@ func (a *app) saveTransposed() {
 }
 
 func (a *app) startEditSong() {
-	// Wired in the Edit song feature; placeholder keeps menu index stable.
-	ink.Message(ink.Info, "Edit song", "Coming next.", 0)
-	a.screen = screenSong
+	a.sel = 0
+	a.scroll = 0
+	a.screen = screenEditSong
+}
+
+func (a *app) runEditSongAction(i int) {
+	if i < 0 || i >= len(editSongActions) {
+		return
+	}
+	switch editSongActions[i] {
+	case "Edit author":
+		a.kbMode = kbEditAuthor
+		ink.OpenKeyboard(a.song.Author, 256)
+	case "Edit title":
+		a.kbMode = kbEditTitle
+		ink.OpenKeyboard(a.song.Title, 256)
+	case "Edit song text":
+		a.kbMode = kbEditText
+		ink.OpenKeyboard(a.song.Text, 16384)
+	case "Done":
+		a.screen = screenSong
+		a.rebuildSongLines()
+	}
+}
+
+func (a *app) saveSongEdits() {
+	if err := a.state.upsertSong(a.song); err != nil {
+		ink.Message(ink.Error, "Edit song", err.Error(), 0)
+		a.status = err.Error()
+		return
+	}
+	a.status = "Song saved"
 }
 
 func (a *app) openSong(s songbook.Song) {
@@ -776,7 +836,7 @@ func (a *app) changeFont(d int) {
 
 func (a *app) goBack() bool {
 	switch a.screen {
-	case screenSongMenu:
+	case screenSongMenu, screenEditSong:
 		a.screen = screenSong
 		ink.Repaint()
 		return true
