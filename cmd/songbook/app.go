@@ -449,10 +449,18 @@ func (a *app) Key(e ink.KeyEvent) bool {
 			return true
 		}
 	case ink.KeyMenu:
-		a.openMenu()
+		a.openSearch()
 		return true
 	}
 	return false
+}
+
+func (a *app) openSearch() {
+	a.screen = screenList
+	a.tab = tabSearch
+	a.ctxTitle = ""
+	a.refreshList()
+	ink.OpenKeyboard(a.filter, 128)
 }
 
 func (a *app) Pointer(e ink.PointerEvent) bool {
@@ -669,11 +677,6 @@ func (a *app) promptImportMode() {
 		ink.Repaint()
 	})
 	ink.Dialog(ink.Question, "Import", "Replace library or merge with current songs?", "Replace", "Merge")
-}
-
-func (a *app) openMenu() {
-	// Temporary: HW Menu still opens import until Search wiring lands.
-	a.promptImportMode()
 }
 
 func (a *app) doImport(replace bool) {

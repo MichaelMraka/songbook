@@ -62,10 +62,10 @@ On the device, internal storage is `/mnt/ext1`. Over USB that same volume appear
 | Move / scroll | Up/Down, or tap list row / song body |
 | Open | OK or tap |
 | Back | Back key |
-| Search | Search tab → tap header to type |
+| Search | Search tab → tap header, or hardware Menu key |
 | Transpose | Left / Right in song view |
 | Font size | Minus / Plus in song view |
-| Import | Menu key |
+| Import | Menu tab → Import library… |
 
 ## Device smoke checklist
 
