@@ -5,8 +5,8 @@ Offline songbook for PocketBook InkPad 3 Pro (**PB740**) compatible with [Karel 
 ## Features (v1)
 
 - Import Zpěvník XML library
-- **Songs / Authors / Playlists** browsing
-- Offline filter (title/author, diacritics-insensitive)
+- **Search / Songs / Authors / Playlists** browsing
+- Offline search (title/author, diacritics-insensitive)
 - Song view with chords above lyrics, transpose, font size, scroll
 
 ## Layout
@@ -57,11 +57,11 @@ On the device, internal storage is `/mnt/ext1`. Over USB that same volume appear
 
 | Action | How |
 |--------|-----|
-| Switch tab | Bottom tabs or Left/Right (on list) |
+| Switch tab | Top tabs or Left/Right (on list) |
 | Move / scroll | Up/Down, or tap list row / song body |
 | Open | OK or tap |
 | Back | Back key |
-| Filter (Songs) | Tap header, or use on-screen keyboard |
+| Search | Search tab → tap header to type |
 | Transpose | Left / Right in song view |
 | Font size | Minus / Plus in song view |
 | Import | Menu key |

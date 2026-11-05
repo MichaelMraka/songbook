@@ -17,17 +17,19 @@ import (
 
 const (
 	defaultLibraryPath = ink.FlashDir + "/songbook/library.xml"
-	tabH               = 48
-	headerH            = 56
-	minFont            = 18
-	maxFont            = 48
-	defaultFont        = 26
+	tabH               = 72
+	headerH            = 96
+	minFont            = 27
+	maxFont            = 72
+	defaultFont        = 39 // ~1.5× previous 26
+	tabCount           = 4
 )
 
 type tab int
 
 const (
-	tabSongs tab = iota
+	tabSearch tab = iota
+	tabSongs
 	tabAuthors
 	tabPlaylists
 )
@@ -71,12 +73,16 @@ type app struct {
 func newApp() *app {
 	return &app{
 		fontSize: defaultFont,
-		tab:      tabSongs,
+		tab:      tabSearch,
 		screen:   screenList,
 	}
 }
 
 func (a *app) Init() error {
+	// Keep portrait so framebuffer Y grows downward on the physical screen.
+	ink.SetDefaultOrientation(ink.Orientation0)
+	ink.SetOrientation(ink.Orientation0)
+	setPanelType(0) // fullscreen; we draw our own top tabs
 	a.openFonts()
 	ink.SetKeyboardHandler(a.onKeyboard)
 	if err := a.loadLibrary(defaultLibraryPath); err != nil {
@@ -85,6 +91,16 @@ func (a *app) Init() error {
 	}
 	a.refreshList()
 	return nil
+}
+
+// layout returns screen size and vertical bands: tabs | header | content.
+// Panel is disabled in Init (setPanelType(0)), so Y starts at 0.
+func (a *app) layout() (sz image.Point, tabs, header, content image.Rectangle) {
+	sz = ink.ScreenSize()
+	tabs = image.Rect(0, 0, sz.X, tabH)
+	header = image.Rect(0, tabs.Max.Y, sz.X, tabs.Max.Y+headerH)
+	content = image.Rect(0, header.Max.Y, sz.X, sz.Y)
+	return sz, tabs, header, content
 }
 
 func (a *app) Close() error {
@@ -129,12 +145,15 @@ func (a *app) refreshList() {
 	a.playlists = a.lib.Playlists()
 	switch a.screen {
 	case screenList:
-		if a.tab == tabSongs {
+		switch a.tab {
+		case tabSearch:
 			if a.filter == "" {
-				a.songs = a.lib.Songs()
+				a.songs = nil
 			} else {
 				a.songs = a.lib.Search(a.filter)
 			}
+		case tabSongs:
+			a.songs = a.lib.Songs()
 		}
 	}
 	a.scroll = 0
@@ -143,69 +162,74 @@ func (a *app) refreshList() {
 
 func (a *app) Draw() {
 	ink.ClearScreen()
-	sz := ink.ScreenSize()
-	content := image.Rect(0, 0, sz.X, sz.Y-tabH)
+	_, tabs, header, content := a.layout()
+
+	a.drawTabs(tabs)
 
 	switch a.screen {
 	case screenSong:
-		a.drawSong(content)
+		a.drawSong(header, content)
 	case screenAuthorSongs, screenPlaylistSongs:
-		a.drawSongList(content, a.ctxTitle)
+		a.drawSongList(header, content, a.ctxTitle)
 	default:
-		a.drawMain(content)
+		a.drawMain(header, content)
 	}
-	a.drawTabs(image.Rect(0, sz.Y-tabH, sz.X, sz.Y))
 	ink.FullUpdate()
 }
 
-func (a *app) drawMain(r image.Rectangle) {
+func (a *app) drawMain(header, list image.Rectangle) {
 	a.font.SetActive(ink.Black)
 	title := "Songbook"
+	status := a.status
 	switch a.tab {
+	case tabSearch:
+		if a.filter == "" {
+			title = "Search"
+			status = "Tap here to type author or song"
+		} else {
+			title = "Search: " + a.filter
+			status = fmt.Sprintf("%d results", len(a.songs))
+		}
 	case tabSongs:
 		title = "Songs"
-		if a.filter != "" {
-			title = "Songs: " + a.filter
-		}
 	case tabAuthors:
 		title = "Authors"
 	case tabPlaylists:
 		title = "Playlists"
 	}
-	ink.DrawString(image.Pt(12, 8), title)
-	if a.status != "" {
-		ink.DrawString(image.Pt(12, 8+a.fontSize+4), a.status)
+	ink.DrawString(image.Pt(12, header.Min.Y+6), title)
+	if status != "" {
+		ink.DrawString(image.Pt(12, header.Min.Y+6+a.fontSize), status)
 	}
-	ink.DrawLine(image.Pt(0, headerH), image.Pt(r.Max.X, headerH), ink.Black)
+	ink.DrawLine(image.Pt(0, header.Max.Y-1), image.Pt(header.Max.X, header.Max.Y-1), ink.Black)
 
-	listTop := headerH + 4
 	rowH := a.fontSize + 12
-	visible := max(1, (r.Max.Y-listTop)/rowH)
-
+	visible := max(1, list.Dy()/rowH)
 	switch a.tab {
-	case tabSongs:
-		a.drawSongRows(r, listTop, rowH, visible, a.songs)
+	case tabSearch, tabSongs:
+		a.drawSongRows(list, rowH, visible, a.songs)
 	case tabAuthors:
-		a.drawAuthorRows(r, listTop, rowH, visible)
+		a.drawAuthorRows(list, rowH, visible)
 	case tabPlaylists:
-		a.drawPlaylistRows(r, listTop, rowH, visible)
+		a.drawPlaylistRows(list, rowH, visible)
 	}
 }
 
-func (a *app) drawSongList(r image.Rectangle, title string) {
+func (a *app) drawSongList(header, list image.Rectangle, title string) {
 	a.font.SetActive(ink.Black)
-	ink.DrawString(image.Pt(12, 8), title)
-	ink.DrawLine(image.Pt(0, headerH), image.Pt(r.Max.X, headerH), ink.Black)
-	listTop := headerH + 4
+	ink.DrawString(image.Pt(12, header.Min.Y+6), title)
+	ink.DrawLine(image.Pt(0, header.Max.Y-1), image.Pt(header.Max.X, header.Max.Y-1), ink.Black)
 	rowH := a.fontSize + 12
-	visible := max(1, (r.Max.Y-listTop)/rowH)
-	a.drawSongRows(r, listTop, rowH, visible, a.songs)
+	visible := max(1, list.Dy()/rowH)
+	a.drawSongRows(list, rowH, visible, a.songs)
 }
 
-func (a *app) drawSongRows(r image.Rectangle, listTop, rowH, visible int, songs []songbook.Song) {
+func (a *app) drawSongRows(list image.Rectangle, rowH, visible int, songs []songbook.Song) {
 	a.font.SetActive(ink.Black)
+	ink.SetClip(list)
+	defer ink.SetClip(ink.Screen())
 	if len(songs) == 0 {
-		ink.DrawString(image.Pt(12, listTop), "(empty)")
+		ink.DrawString(image.Pt(12, list.Min.Y+2), "(empty)")
 		return
 	}
 	if a.sel < a.scroll {
@@ -216,20 +240,25 @@ func (a *app) drawSongRows(r image.Rectangle, listTop, rowH, visible int, songs 
 	}
 	end := min(len(songs), a.scroll+visible)
 	for i := a.scroll; i < end; i++ {
-		y := listTop + (i-a.scroll)*rowH
+		y := list.Min.Y + (i-a.scroll)*rowH
+		if y+rowH > list.Max.Y {
+			break
+		}
 		label := songs[i].DisplayLabel()
 		if i == a.sel {
-			ink.FillArea(image.Rect(0, y, r.Max.X, y+rowH), ink.LightGray)
+			ink.FillArea(image.Rect(list.Min.X, y, list.Max.X, min(y+rowH, list.Max.Y)), ink.LightGray)
 		}
-		ink.DrawString(image.Pt(12, y+2), truncate(label, r.Max.X-24))
+		ink.DrawString(image.Pt(12, y+2), truncate(label, list.Dx()-24))
 	}
 }
 
-func (a *app) drawAuthorRows(r image.Rectangle, listTop, rowH, visible int) {
+func (a *app) drawAuthorRows(list image.Rectangle, rowH, visible int) {
 	a.font.SetActive(ink.Black)
+	ink.SetClip(list)
+	defer ink.SetClip(ink.Screen())
 	items := a.authors
 	if len(items) == 0 {
-		ink.DrawString(image.Pt(12, listTop), "(empty)")
+		ink.DrawString(image.Pt(12, list.Min.Y+2), "(empty)")
 		return
 	}
 	if a.sel < a.scroll {
@@ -240,20 +269,25 @@ func (a *app) drawAuthorRows(r image.Rectangle, listTop, rowH, visible int) {
 	}
 	end := min(len(items), a.scroll+visible)
 	for i := a.scroll; i < end; i++ {
-		y := listTop + (i-a.scroll)*rowH
+		y := list.Min.Y + (i-a.scroll)*rowH
+		if y+rowH > list.Max.Y {
+			break
+		}
 		label := fmt.Sprintf("%s  (%d)", items[i].Name, items[i].Count)
 		if i == a.sel {
-			ink.FillArea(image.Rect(0, y, r.Max.X, y+rowH), ink.LightGray)
+			ink.FillArea(image.Rect(list.Min.X, y, list.Max.X, min(y+rowH, list.Max.Y)), ink.LightGray)
 		}
-		ink.DrawString(image.Pt(12, y+2), truncate(label, r.Max.X-24))
+		ink.DrawString(image.Pt(12, y+2), truncate(label, list.Dx()-24))
 	}
 }
 
-func (a *app) drawPlaylistRows(r image.Rectangle, listTop, rowH, visible int) {
+func (a *app) drawPlaylistRows(list image.Rectangle, rowH, visible int) {
 	a.font.SetActive(ink.Black)
+	ink.SetClip(list)
+	defer ink.SetClip(ink.Screen())
 	items := a.playlists
 	if len(items) == 0 {
-		ink.DrawString(image.Pt(12, listTop), "(empty)")
+		ink.DrawString(image.Pt(12, list.Min.Y+2), "(empty)")
 		return
 	}
 	if a.sel < a.scroll {
@@ -264,41 +298,46 @@ func (a *app) drawPlaylistRows(r image.Rectangle, listTop, rowH, visible int) {
 	}
 	end := min(len(items), a.scroll+visible)
 	for i := a.scroll; i < end; i++ {
-		y := listTop + (i-a.scroll)*rowH
+		y := list.Min.Y + (i-a.scroll)*rowH
+		if y+rowH > list.Max.Y {
+			break
+		}
 		n := len(a.lib.PlaylistSongs(items[i].ID))
 		label := fmt.Sprintf("%s  (%d)", items[i].Title, n)
 		if i == a.sel {
-			ink.FillArea(image.Rect(0, y, r.Max.X, y+rowH), ink.LightGray)
+			ink.FillArea(image.Rect(list.Min.X, y, list.Max.X, min(y+rowH, list.Max.Y)), ink.LightGray)
 		}
-		ink.DrawString(image.Pt(12, y+2), truncate(label, r.Max.X-24))
+		ink.DrawString(image.Pt(12, y+2), truncate(label, list.Dx()-24))
 	}
 }
 
-func (a *app) drawSong(r image.Rectangle) {
+func (a *app) drawSong(header, body image.Rectangle) {
 	a.font.SetActive(ink.Black)
 	hdr := a.song.DisplayLabel()
 	step := a.song.Step + a.transpose
-	ink.DrawString(image.Pt(12, 4), truncate(hdr, r.Max.X-12))
-	ink.DrawString(image.Pt(12, 4+a.fontSize), fmt.Sprintf("transpose %+d  font %d", step, a.fontSize))
-	ink.DrawLine(image.Pt(0, headerH), image.Pt(r.Max.X, headerH), ink.Black)
+	ink.DrawString(image.Pt(12, header.Min.Y+4), truncate(hdr, header.Dx()-12))
+	ink.DrawString(image.Pt(12, header.Min.Y+4+a.fontSize), fmt.Sprintf("transpose %+d  font %d", step, a.fontSize))
+	ink.DrawLine(image.Pt(0, header.Max.Y-1), image.Pt(header.Max.X, header.Max.Y-1), ink.Black)
 
-	y := headerH + 8
+	ink.SetClip(body)
+	defer ink.SetClip(ink.Screen())
+	y := body.Min.Y + 4
 	lineH := a.fontSize + 6
 	if a.mono != nil {
 		a.mono.SetActive(ink.Black)
 	}
 	for i := a.songScroll; i < len(a.lines); i++ {
-		if y+lineH > r.Max.Y {
+		if y+lineH > body.Max.Y {
 			break
 		}
-		ink.DrawString(image.Pt(12, y), truncate(a.lines[i].Text, r.Max.X-24))
+		ink.DrawString(image.Pt(12, y), truncate(a.lines[i].Text, body.Dx()-24))
 		y += lineH
 	}
 }
 
 func (a *app) drawTabs(r image.Rectangle) {
 	ink.DrawLine(image.Pt(r.Min.X, r.Min.Y), image.Pt(r.Max.X, r.Min.Y), ink.Black)
-	labels := []string{"Songs", "Authors", "Playlists"}
+	labels := []string{"Search", "Songs", "Authors", "Playlists"}
 	w := r.Dx() / len(labels)
 	a.font.SetActive(ink.Black)
 	for i, lab := range labels {
@@ -307,7 +346,7 @@ func (a *app) drawTabs(r image.Rectangle) {
 		if tab(i) == a.tab && a.screen != screenSong {
 			ink.FillArea(cell, ink.LightGray)
 		}
-		ink.DrawString(image.Pt(x0+12, r.Min.Y+12), lab)
+		ink.DrawString(image.Pt(x0+8, r.Min.Y+(r.Dy()-a.fontSize)/2), lab)
 	}
 }
 
@@ -374,15 +413,18 @@ func (a *app) Pointer(e ink.PointerEvent) bool {
 	if e.State != ink.PointerUp {
 		return true
 	}
-	sz := ink.ScreenSize()
-	if e.Y >= sz.Y-tabH {
-		w := sz.X / 3
-		a.setTab(tab(e.X / w))
+	_, tabs, header, list := a.layout()
+	if e.Y >= tabs.Min.Y && e.Y < tabs.Max.Y {
+		w := tabs.Dx() / tabCount
+		if w <= 0 {
+			w = 1
+		}
+		a.setTab(tab((e.X - tabs.Min.X) / w))
 		ink.Repaint()
 		return true
 	}
 	if a.screen == screenSong {
-		mid := sz.Y / 2
+		mid := (list.Min.Y + list.Max.Y) / 2
 		if e.Y < mid {
 			a.songScroll = max(0, a.songScroll-8)
 		} else {
@@ -391,17 +433,16 @@ func (a *app) Pointer(e ink.PointerEvent) bool {
 		ink.Repaint()
 		return true
 	}
-	listTop := headerH + 4
 	rowH := a.fontSize + 12
-	if e.Y < listTop {
-		// header tap: filter on songs tab
-		if a.screen == screenList && a.tab == tabSongs {
+	if e.Y < list.Min.Y {
+		// header tap opens search keyboard
+		if a.screen == screenList && a.tab == tabSearch && e.Y >= header.Min.Y {
 			ink.OpenKeyboard(a.filter, 128)
 			return true
 		}
 		return true
 	}
-	idx := a.scroll + (e.Y-listTop)/rowH
+	idx := a.scroll + (e.Y-list.Min.Y)/rowH
 	a.sel = idx
 	a.activate()
 	ink.Repaint()
@@ -418,7 +459,7 @@ func (a *app) Orientation(o ink.Orientation) bool {
 func (a *app) onKeyboard(text string) {
 	a.filter = strings.TrimSpace(text)
 	a.screen = screenList
-	a.tab = tabSongs
+	a.tab = tabSearch
 	a.refreshList()
 	ink.Repaint()
 }
@@ -431,7 +472,7 @@ func (a *app) listLen() int {
 		return len(a.songs)
 	default:
 		switch a.tab {
-		case tabSongs:
+		case tabSearch, tabSongs:
 			return len(a.songs)
 		case tabAuthors:
 			return len(a.authors)
@@ -458,7 +499,7 @@ func (a *app) activate() {
 	switch a.screen {
 	case screenList:
 		switch a.tab {
-		case tabSongs:
+		case tabSearch, tabSongs:
 			if a.sel >= 0 && a.sel < len(a.songs) {
 				a.openSong(a.songs[a.sel])
 			}
@@ -534,14 +575,19 @@ func (a *app) switchTab(delta int) {
 		a.screen = screenList
 		a.ctxTitle = ""
 	}
-	a.setTab(tab(clamp(int(a.tab)+delta, 0, 2)))
+	a.setTab(tab(clamp(int(a.tab)+delta, 0, tabCount-1)))
 }
 
 func (a *app) setTab(t tab) {
+	if t < 0 {
+		t = 0
+	}
+	if t >= tabCount {
+		t = tabCount - 1
+	}
 	a.tab = t
 	a.screen = screenList
 	a.ctxTitle = ""
-	a.filter = a.filter // keep filter for songs
 	a.refreshList()
 	a.sel = 0
 	a.scroll = 0
