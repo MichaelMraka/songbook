@@ -203,11 +203,15 @@ func (a *app) drawMain(header, list image.Rectangle) {
 	status := a.status
 	switch a.tab {
 	case tabSearch:
+		ft := "[ ]"
+		if a.state.Settings.SearchFulltext {
+			ft = "[x]"
+		}
 		if a.filter == "" {
-			title = "Search"
-			status = "Tap here to type author or song"
+			title = "Search  " + ft + " fulltext"
+			status = "Tap title to type; tap fulltext to toggle"
 		} else {
-			title = "Search: " + a.filter
+			title = "Search: " + a.filter + "  " + ft
 			status = fmt.Sprintf("%d results", len(a.songs))
 		}
 	case tabSongs:
@@ -463,6 +467,17 @@ func (a *app) openSearch() {
 	ink.OpenKeyboard(a.filter, 128)
 }
 
+func (a *app) toggleFulltextSearch() {
+	a.state.Settings.SearchFulltext = !a.state.Settings.SearchFulltext
+	_ = a.state.saveSettings()
+	a.refreshList()
+	if a.state.Settings.SearchFulltext {
+		a.status = "Fulltext search on"
+	} else {
+		a.status = "Fulltext search off"
+	}
+}
+
 func (a *app) Pointer(e ink.PointerEvent) bool {
 	if e.State != ink.PointerUp && e.State != ink.PointerDown {
 		return false
@@ -492,8 +507,13 @@ func (a *app) Pointer(e ink.PointerEvent) bool {
 	}
 	rowH := a.fontSize + 12
 	if e.Y < list.Min.Y {
-		// header tap opens search keyboard
 		if a.screen == screenList && a.tab == tabSearch && e.Y >= header.Min.Y {
+			// Right third of header toggles fulltext; left opens keyboard.
+			if e.X >= header.Dx()*2/3 {
+				a.toggleFulltextSearch()
+				ink.Repaint()
+				return true
+			}
 			ink.OpenKeyboard(a.filter, 128)
 			return true
 		}
