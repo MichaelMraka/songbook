@@ -5,9 +5,11 @@ package main
 import (
 	"fmt"
 	"image"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	ink "github.com/dennwc/inkview"
 
@@ -36,6 +38,7 @@ const (
 // Menu tab actions (extend as features land).
 var menuActions = []string{
 	"Import library…",
+	"Random song",
 }
 
 type screen int
@@ -75,6 +78,7 @@ type app struct {
 }
 
 func newApp() *app {
+	rand.Seed(time.Now().UnixNano())
 	return &app{
 		state:    newAppState(),
 		fontSize: defaultFont,
@@ -684,7 +688,18 @@ func (a *app) runMenuAction(i int) {
 	switch menuActions[i] {
 	case "Import library…":
 		a.promptImportMode()
+	case "Random song":
+		a.openRandomSong()
 	}
+}
+
+func (a *app) openRandomSong() {
+	songs := a.state.Lib.Songs()
+	if len(songs) == 0 {
+		ink.Message(ink.Warning, "Random song", "Library is empty.", 0)
+		return
+	}
+	a.openSong(songs[rand.Intn(len(songs))])
 }
 
 func (a *app) promptImportMode() {
