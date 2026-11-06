@@ -22,6 +22,14 @@ type DisplayLine struct {
 
 // Render turns songtext into chord/lyric display lines.
 // transpose is semitones relative to the written chords (usually song.Step + session).
+//
+// Bracket tokens [Chord] are control markers only — they never appear in output.
+// Two authoring styles are supported and may mix in one song:
+//  1. Chord-only lines above lyrics (spaces between markers), e.g. Rosa na kolejích:
+//     [C]        [F6] [F#6] [G6]
+//     1. Tak, jako jazyk…
+//  2. Inline chords inside a lyric line, e.g. A pusť ty holuby:
+//     [C]Tak běž Vašku [F]a pusť ty [G]holuby
 func Render(songtext string, transpose int) []DisplayLine {
 	raw := strings.ReplaceAll(songtext, "\r\n", "\n")
 	raw = strings.ReplaceAll(raw, "\r", "\n")
@@ -94,13 +102,26 @@ func renderLine(line string, transpose int) []DisplayLine {
 
 	lyricStr := lyric.String()
 	chordRunes := []rune(strings.Repeat(" ", max(utf8.RuneCountInString(lyricStr), 1)))
+	// Place at the lyric column when possible, but never overwrite a previous chord
+	// (common with [F6] [F#6] [G6] where only one space separates markers).
+	nextCol := 0
 	for _, p := range placedChords {
-		writeChordAt(&chordRunes, p.col, p.chord)
+		col := p.col
+		if col < nextCol {
+			col = nextCol
+		}
+		writeChordAt(&chordRunes, col, p.chord)
+		nextCol = col + utf8.RuneCountInString(p.chord) + 1
 	}
-	return []DisplayLine{
+	out := []DisplayLine{
 		{Kind: LineChord, Text: strings.TrimRight(string(chordRunes), " ")},
-		{Kind: LineLyric, Text: lyricStr},
 	}
+	// Chord-only source lines (spaces between [chords]) must not emit a blank
+	// lyric row — that shows up as an extra empty line under the chords.
+	if strings.TrimSpace(lyricStr) != "" {
+		out = append(out, DisplayLine{Kind: LineLyric, Text: lyricStr})
+	}
+	return out
 }
 
 func writeChordAt(buf *[]rune, col int, chord string) {

@@ -457,30 +457,45 @@ func (a *app) drawSong(header, body image.Rectangle) {
 		}
 		line := a.lines[i]
 		a.setSongLineStyle(line.Kind)
-		ink.DrawString(image.Pt(12, y), truncate(line.Text, body.Dx()-24))
+		pt := image.Pt(12, y)
+		text := truncate(line.Text, body.Dx()-24)
+		ink.DrawString(pt, text)
+		// Faux-bold chord highlight: same mono metrics as lyrics (real Bold
+		// face would shift columns), drawn 1px right for weight on e-ink.
+		if line.Kind == songbook.LineChord && a.chordHighlightOn() {
+			ink.DrawString(image.Pt(pt.X+1, pt.Y), text)
+		}
 		y += lineH
 	}
 }
 
+func (a *app) chordHighlightOn() bool {
+	return a.state != nil && a.state.Settings.ChordHighlight != songbook.ChordHighlightOff
+}
+
 func (a *app) setSongLineStyle(kind songbook.LineKind) {
-	var cl color.Color = ink.Black
-	switch a.state.Settings.ChordColor {
-	case songbook.ChordColorYellow, songbook.ChordColorGreen:
-		cl = ink.DarkGray // e-ink stand-in for named colors
-	case songbook.ChordColorRed:
-		cl = ink.Black
+	// Chord columns are space-aligned; chord and lyric rows must share one
+	// monospace face/size or the chords drift off the words.
+	face := a.mono
+	if face == nil {
+		face = a.font
 	}
 	if kind == songbook.LineChord {
-		if a.state.Settings.ChordHighlight == songbook.ChordHighlightBold && a.bold != nil {
-			a.bold.SetActive(cl)
-			return
+		var cl color.Color = ink.Black
+		if a.chordHighlightOn() {
+			switch a.state.Settings.ChordColor {
+			case songbook.ChordColorYellow, songbook.ChordColorGreen:
+				cl = ink.DarkGray // e-ink stand-in for named colors
+			case songbook.ChordColorRed:
+				cl = ink.Black
+			default:
+				cl = ink.Black
+			}
 		}
-		if a.mono != nil {
-			a.mono.SetActive(cl)
-			return
-		}
+		face.SetActive(cl)
+		return
 	}
-	a.font.SetActive(ink.Black)
+	face.SetActive(ink.Black)
 }
 
 func (a *app) drawTabs(r image.Rectangle) {
