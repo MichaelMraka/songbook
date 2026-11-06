@@ -543,12 +543,30 @@ func (a *app) Key(e ink.KeyEvent) bool {
 	switch e.Key {
 	case ink.KeyBack:
 		return a.goBack()
-	case ink.KeyUp, ink.KeyPrev, ink.KeyPrev2:
+	case ink.KeyUp:
 		a.moveSel(-1)
 		ink.Repaint()
 		return true
-	case ink.KeyDown, ink.KeyNext, ink.KeyNext2:
+	case ink.KeyDown:
 		a.moveSel(1)
+		ink.Repaint()
+		return true
+	case ink.KeyPrev, ink.KeyPrev2:
+		// Hardware < : page lists; on song view keep line scroll.
+		if a.pagingList() {
+			a.pageSel(-1)
+		} else {
+			a.moveSel(-1)
+		}
+		ink.Repaint()
+		return true
+	case ink.KeyNext, ink.KeyNext2:
+		// Hardware > : page lists; on song view keep line scroll.
+		if a.pagingList() {
+			a.pageSel(1)
+		} else {
+			a.moveSel(1)
+		}
 		ink.Repaint()
 		return true
 	case ink.KeyOk:
@@ -737,6 +755,31 @@ func (a *app) moveSel(delta int) {
 		return
 	}
 	a.sel = clamp(a.sel+delta, 0, n-1)
+}
+
+func (a *app) pagingList() bool {
+	switch a.screen {
+	case screenList, screenAuthorSongs, screenPlaylistSongs:
+		return true
+	default:
+		return false
+	}
+}
+
+func (a *app) listVisibleRows() int {
+	_, _, _, list := a.layout()
+	rowH := a.fontSize + 12
+	return max(1, list.Dy()/rowH)
+}
+
+// pageSel jumps by one screen of rows (hardware < / > on song/author lists).
+func (a *app) pageSel(dir int) {
+	n := a.listLen()
+	if n == 0 {
+		return
+	}
+	page := a.listVisibleRows()
+	a.sel = clamp(a.sel+dir*page, 0, n-1)
 }
 
 func (a *app) activate() {
