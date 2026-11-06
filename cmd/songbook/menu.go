@@ -28,7 +28,7 @@ func (a *app) menuLabels() []string {
 		"Sort: " + sortLabel(s.Sort),
 		"List font: " + string(s.ListFontSize),
 		"Song font: " + string(s.SongFontSize),
-		"Font: " + fontFamilyLabel(s.FontFamily),
+		"Song face: " + fontFamilyLabel(s.FontFamily),
 		"Chords: " + chordStyleLabel(s.ChordHighlight, s.ChordColor),
 	}
 }
@@ -178,7 +178,7 @@ func (a *app) runMainMenuAction(i int) {
 	case 4:
 		a.openSettingMenu(menuKindSongFont, "Song font", fontSizeChoiceLabels(), indexOfFontSize(a.state.Settings.SongFontSize))
 	case 5:
-		a.openSettingMenu(menuKindFont, "Font", fontFamilyChoiceLabels(), indexOfFontFamily(a.state.Settings.FontFamily))
+		a.openSettingMenu(menuKindFont, "Song face", fontFamilyChoiceLabels(), indexOfFontFamily(a.state.Settings.FontFamily))
 	case 6:
 		a.openSettingMenu(menuKindChords, "Chords", chordChoiceLabels(), indexOfChord(a.state.Settings.ChordHighlight, a.state.Settings.ChordColor))
 	}
@@ -216,7 +216,7 @@ func (a *app) applySettingChoice(kind appMenuKind, i int) {
 		}
 		a.state.Settings.FontFamily = choices[i]
 		a.persistSettings()
-		a.applyListFontFromSettings()
+		// Face applies to song view only; list always stays on the default face.
 	case menuKindChords:
 		choices := chordChoices()
 		if i < 0 || i >= len(choices) {

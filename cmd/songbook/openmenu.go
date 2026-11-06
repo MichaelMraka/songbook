@@ -84,6 +84,8 @@ func (a *app) openSettingMenu(kind appMenuKind, title string, labels []string, s
 // openIvMenu builds a PocketBook OpenMenu. selected >= 0 marks that choice with a bullet
 // and focuses it; use -1 when there is no current selection highlight.
 func (a *app) openIvMenu(title string, labels []string, selected int) {
+	// OpenMenu inherits the active face; keep chrome independent of list/song fonts.
+	a.activateUIFont()
 	freeMenuCStrings()
 
 	menuCItems = make([]C.imenu, len(labels)+2)

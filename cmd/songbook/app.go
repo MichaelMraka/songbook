@@ -23,6 +23,7 @@ const (
 	minFont     = 27
 	maxFont     = 72
 	defaultFont = 39 // ~1.5× previous 26
+	uiFontSize  = 36 // fixed chrome/menu face; independent of list/song fonts
 	tabCount    = 5
 )
 
@@ -97,9 +98,10 @@ type app struct {
 	fromScreen screen // screen to return to from song view
 
 	status string
-	font   *ink.Font
+	font   *ink.Font // list / content face (follows list or song settings)
 	mono   *ink.Font
 	bold   *ink.Font
+	uiFont *ink.Font // fixed chrome + OpenMenu; never follows list/song fonts
 
 	kbMode            keyboardMode
 	pendingImportPath string
@@ -124,6 +126,7 @@ func (a *app) Init() error {
 	ink.SetDefaultOrientation(ink.Orientation0)
 	ink.SetOrientation(ink.Orientation0)
 	enableSystemPanel() // clock/wifi/battery; no FB offset (see panel.go)
+	a.openUIFont()
 	a.openFonts()
 	ink.SetKeyboardHandler(a.onKeyboard)
 	if err := a.state.load(); err != nil {
@@ -141,9 +144,10 @@ func (a *app) Init() error {
 }
 
 func (a *app) applyListFontFromSettings() {
+	// List chrome always uses the default face (same family as UI); only size varies.
 	a.fontSize = songbook.FontSizePixels(a.state.Settings.ListFontSize, defaultFont)
 	a.fontSize = clamp(a.fontSize, minFont, maxFont)
-	a.openFonts()
+	a.openFontsWithFace(ink.DefaultFont)
 }
 
 func (a *app) applySongFontFromSettings(songID string) {
@@ -157,23 +161,40 @@ func (a *app) applySongFontFromSettings(songID string) {
 			family = m.FontFamily
 		}
 	}
-	prevFamily := a.state.Settings.FontFamily
-	a.state.Settings.FontFamily = family
 	a.fontSize = songbook.FontSizePixels(step, defaultFont)
 	a.fontSize = clamp(a.fontSize, minFont, maxFont)
-	a.openFonts()
-	a.state.Settings.FontFamily = prevFamily
+	a.openFontsWithFace(songFace(family))
+}
+
+func songFace(family string) string {
+	if family == "mono" {
+		return ink.DefaultFontMono
+	}
+	return ink.DefaultFont
 }
 
 // layout returns screen size and vertical bands below the system panel:
-// tabs | header | content.
+// tabs | header | content. List pages omit the header band.
 func (a *app) layout() (sz image.Point, tabs, header, content image.Rectangle) {
 	sz = ink.ScreenSize()
 	top := appChromeTop()
 	tabs = image.Rect(0, top, sz.X, top+tabH)
-	header = image.Rect(0, tabs.Max.Y, sz.X, tabs.Max.Y+headerH)
+	hh := 0
+	if !a.listPage() {
+		hh = headerH
+	}
+	header = image.Rect(0, tabs.Max.Y, sz.X, tabs.Max.Y+hh)
 	content = image.Rect(0, header.Max.Y, sz.X, sz.Y)
 	return sz, tabs, header, content
+}
+
+func (a *app) listPage() bool {
+	switch a.screen {
+	case screenList, screenAuthorSongs, screenPlaylistSongs:
+		return true
+	default:
+		return false
+	}
 }
 
 func (a *app) Close() error {
@@ -186,10 +207,25 @@ func (a *app) Close() error {
 	if a.bold != nil {
 		a.bold.Close()
 	}
+	if a.uiFont != nil {
+		a.uiFont.Close()
+	}
 	return nil
 }
 
+// openUIFont loads the fixed chrome/menu face once (not tied to list/song settings).
+func (a *app) openUIFont() {
+	if a.uiFont != nil {
+		a.uiFont.Close()
+	}
+	a.uiFont = ink.OpenFont(ink.DefaultFont, uiFontSize, true)
+}
+
 func (a *app) openFonts() {
+	a.openFontsWithFace(ink.DefaultFont)
+}
+
+func (a *app) openFontsWithFace(face string) {
 	if a.font != nil {
 		a.font.Close()
 	}
@@ -199,13 +235,15 @@ func (a *app) openFonts() {
 	if a.bold != nil {
 		a.bold.Close()
 	}
-	face := ink.DefaultFont
-	if a.state != nil && a.state.Settings.FontFamily == "mono" {
-		face = ink.DefaultFontMono
-	}
 	a.font = ink.OpenFont(face, a.fontSize, true)
 	a.mono = ink.OpenFont(ink.DefaultFontMono, a.fontSize, true)
 	a.bold = ink.OpenFont(ink.DefaultFontBold, a.fontSize, true)
+}
+
+func (a *app) activateUIFont() {
+	if a.uiFont != nil {
+		a.uiFont.SetActive(ink.Black)
+	}
 }
 
 func (a *app) refreshList() {
@@ -260,39 +298,8 @@ func (a *app) Draw() {
 	ink.FullUpdate()
 }
 
-func (a *app) drawMain(header, list image.Rectangle) {
-	a.font.SetActive(ink.Black)
-	title := "Songbook"
-	status := a.status
-	switch a.tab {
-	case tabSearch:
-		ft := "[ ]"
-		if a.state.Settings.SearchFulltext {
-			ft = "[x]"
-		}
-		if a.filter == "" {
-			title = "Search  " + ft + " fulltext"
-			status = "Tap title to type; tap fulltext to toggle"
-		} else {
-			title = "Search: " + a.filter + "  " + ft
-			status = fmt.Sprintf("%d results", len(a.songs))
-		}
-	case tabSongs:
-		title = "Songs"
-	case tabAuthors:
-		title = "Authors"
-	case tabPlaylists:
-		title = "Playlists"
-	case tabMenu:
-		title = "Menu"
-		status = "Actions"
-	}
-	ink.DrawString(image.Pt(12, header.Min.Y+6), title)
-	if status != "" {
-		ink.DrawString(image.Pt(12, header.Min.Y+6+a.fontSize), status)
-	}
-	ink.DrawLine(image.Pt(0, header.Max.Y-1), image.Pt(header.Max.X, header.Max.Y-1), ink.Black)
-
+func (a *app) drawMain(_, list image.Rectangle) {
+	// List pages have no title/status header — content starts under the tab bar.
 	rowH := a.fontSize + 12
 	visible := max(1, list.Dy()/rowH)
 	switch a.tab {
@@ -343,10 +350,7 @@ func (a *app) drawStringRows(list image.Rectangle, rowH, visible int, items []st
 	}
 }
 
-func (a *app) drawSongList(header, list image.Rectangle, title string) {
-	a.font.SetActive(ink.Black)
-	ink.DrawString(image.Pt(12, header.Min.Y+6), title)
-	ink.DrawLine(image.Pt(0, header.Max.Y-1), image.Pt(header.Max.X, header.Max.Y-1), ink.Black)
+func (a *app) drawSongList(_, list image.Rectangle, _ string) {
 	rowH := a.fontSize + 12
 	visible := max(1, list.Dy()/rowH)
 	a.drawSongRows(list, rowH, visible, a.songs)
@@ -474,11 +478,10 @@ func (a *app) chordHighlightOn() bool {
 }
 
 func (a *app) setSongLineStyle(kind songbook.LineKind) {
-	// Chord columns are space-aligned; chord and lyric rows must share one
-	// monospace face/size or the chords drift off the words.
-	face := a.mono
+	// Chord + lyric share the song face (default or mono from settings).
+	face := a.font
 	if face == nil {
-		face = a.font
+		face = a.mono
 	}
 	if kind == songbook.LineChord {
 		var cl color.Color = ink.Black
@@ -502,7 +505,7 @@ func (a *app) drawTabs(r image.Rectangle) {
 	labels := []string{" Search", " Songs", " Authors", " Playlists", " Menu"}
 	n := len(labels)
 	w := r.Dx() / n
-	a.font.SetActive(ink.Black)
+	a.activateUIFont()
 
 	// Fill bar white so panel/content don't bleed through.
 	ink.FillArea(r, ink.White)
@@ -520,7 +523,7 @@ func (a *app) drawTabs(r image.Rectangle) {
 			ink.FillArea(cell, ink.LightGray)
 			ink.DrawRect(cell, ink.Black)
 		}
-		ink.DrawString(image.Pt(x0+6, cell.Min.Y+(cell.Dy()-a.fontSize)/2), lab)
+		ink.DrawString(image.Pt(x0+6, cell.Min.Y+(cell.Dy()-uiFontSize)/2), lab)
 
 		// Vertical divider between items (PocketBook-style hairline).
 		if i > 0 {
@@ -624,7 +627,7 @@ func (a *app) Pointer(e ink.PointerEvent) bool {
 	if e.State != ink.PointerUp {
 		return true
 	}
-	_, tabs, header, list := a.layout()
+	_, tabs, _, list := a.layout()
 	if e.Y >= tabs.Min.Y && e.Y < tabs.Max.Y {
 		w := tabs.Dx() / tabCount
 		if w <= 0 {
@@ -654,16 +657,6 @@ func (a *app) Pointer(e ink.PointerEvent) bool {
 		return true
 	}
 	if e.Y < list.Min.Y {
-		if a.screen == screenList && a.tab == tabSearch && e.Y >= header.Min.Y {
-			// Right third of header toggles fulltext; left opens keyboard.
-			if e.X >= header.Dx()*2/3 {
-				a.toggleFulltextSearch()
-				ink.Repaint()
-				return true
-			}
-			ink.OpenKeyboard(a.filter, 128)
-			return true
-		}
 		return true
 	}
 	idx := a.scroll + (e.Y-list.Min.Y)/rowH
@@ -866,10 +859,23 @@ func (a *app) changeTranspose(d int) {
 
 func (a *app) changeFont(d int) {
 	a.fontSize = clamp(a.fontSize+d, minFont, maxFont)
-	a.openFonts()
 	if a.screen == screenSong || a.screen == screenSongMenu {
+		a.openFontsWithFace(a.currentSongFace())
 		a.persistSongFontSizeFromPixels()
+		return
 	}
+	a.openFontsWithFace(ink.DefaultFont)
+}
+
+func (a *app) currentSongFace() string {
+	family := ""
+	if a.state != nil {
+		family = a.state.Settings.FontFamily
+		if m := a.state.Settings.SongMeta(a.song.ID); m.FontFamily != "" {
+			family = m.FontFamily
+		}
+	}
+	return songFace(family)
 }
 
 func (a *app) persistSongFontSizeFromPixels() {
@@ -939,11 +945,11 @@ func (a *app) goBack() bool {
 }
 
 func (a *app) switchTab(delta int) {
-	if a.screen != screenList {
-		a.screen = screenList
-		a.ctxTitle = ""
-	}
 	a.setTab(tab(clamp(int(a.tab)+delta, 0, tabCount-1)))
+}
+
+func (a *app) leavingSongView() bool {
+	return a.screen == screenSong || a.screen == screenSongMenu || a.screen == screenEditSong
 }
 
 func (a *app) setTab(t tab) {
@@ -953,9 +959,10 @@ func (a *app) setTab(t tab) {
 	if t >= tabCount {
 		t = tabCount - 1
 	}
+	fromSong := a.leavingSongView()
 	if t == tabMenu {
 		// On song detail, Menu opens the song-specific menu — not the app menu.
-		if a.screen == screenSong || a.screen == screenSongMenu || a.screen == screenEditSong {
+		if fromSong {
 			a.openSongMenu()
 			return
 		}
@@ -976,6 +983,10 @@ func (a *app) setTab(t tab) {
 		a.openAppMenu()
 		return
 	}
+	// Song view swaps in song font size/face; restore list settings when leaving.
+	if fromSong {
+		a.applyListFontFromSettings()
+	}
 	a.tab = t
 	a.menuReturn = t
 	a.screen = screenList
@@ -984,6 +995,9 @@ func (a *app) setTab(t tab) {
 	a.sel = 0
 	a.scroll = 0
 	a.status = fmt.Sprintf("%d songs", a.state.Lib.SongCount())
+	if t == tabSearch {
+		ink.OpenKeyboard(a.filter, 128)
+	}
 }
 
 func (a *app) promptImportFilename() {
