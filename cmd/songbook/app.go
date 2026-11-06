@@ -103,6 +103,9 @@ type app struct {
 
 	kbMode            keyboardMode
 	pendingImportPath string
+
+	menuReturn tab         // tab shown under / after native OpenMenu (Menu is a trigger)
+	menuKind   appMenuKind // main OpenMenu vs a settings submenu
 }
 
 func newApp() *app {
@@ -116,6 +119,7 @@ func newApp() *app {
 }
 
 func (a *app) Init() error {
+	setAppRef(a)
 	// Keep portrait so framebuffer Y grows downward on the physical screen.
 	ink.SetDefaultOrientation(ink.Orientation0)
 	ink.SetOrientation(ink.Orientation0)
@@ -585,12 +589,7 @@ func (a *app) openSearch() {
 	ink.OpenKeyboard(a.filter, 128)
 }
 
-func (a *app) openSongMenu() {
-	a.sel = 0
-	a.scroll = 0
-	a.screen = screenSongMenu
-	ink.Repaint()
-}
+// openSongMenu is implemented in openmenu.go (native OpenMenu).
 
 func (a *app) toggleFulltextSearch() {
 	a.state.Settings.SearchFulltext = !a.state.Settings.SearchFulltext
@@ -773,31 +772,8 @@ func (a *app) activate() {
 }
 
 func (a *app) runSongMenuAction(i int) {
-	if i < 0 || i >= len(songMenuActions) {
-		return
-	}
-	switch songMenuActions[i] {
-	case "Transpose up":
-		a.changeTranspose(1)
-		a.screen = screenSong
-	case "Transpose down":
-		a.changeTranspose(-1)
-		a.screen = screenSong
-	case "Save transposed":
-		a.saveTransposed()
-		a.screen = screenSong
-	case "Edit song…":
-		a.startEditSong()
-	case "Song font size…":
-		a.cycleSongMetaFontSize()
-		a.screen = screenSong
-	case "Song font family…":
-		a.cycleSongMetaFontFamily()
-		a.screen = screenSong
-	case "Reset song font":
-		a.resetSongMetaFont()
-		a.screen = screenSong
-	}
+	// Legacy list-UI path; native OpenMenu uses runSongOpenMenuAction.
+	a.runSongOpenMenuAction(i)
 }
 
 func (a *app) saveTransposed() {
@@ -911,44 +887,6 @@ func nearestFontSize(px, base int) songbook.FontSizeStep {
 	return best
 }
 
-func (a *app) cycleSongMetaFontSize() {
-	m := a.state.Settings.SongMeta(a.song.ID)
-	cur := m.FontSize
-	if cur == "" {
-		cur = a.state.Settings.SongFontSize
-	}
-	m.FontSize = nextFontSize(cur)
-	if a.state.Settings.Songs == nil {
-		a.state.Settings.Songs = map[string]songbook.SongMeta{}
-	}
-	a.state.Settings.Songs[a.song.ID] = m
-	_ = a.state.saveSettings()
-	a.applySongFontFromSettings(a.song.ID)
-	a.status = "Song font: " + string(m.FontSize)
-}
-
-func (a *app) cycleSongMetaFontFamily() {
-	m := a.state.Settings.SongMeta(a.song.ID)
-	if m.FontFamily == "mono" {
-		m.FontFamily = ""
-	} else {
-		m.FontFamily = "mono"
-	}
-	if a.state.Settings.Songs == nil {
-		a.state.Settings.Songs = map[string]songbook.SongMeta{}
-	}
-	a.state.Settings.Songs[a.song.ID] = m
-	_ = a.state.saveSettings()
-	// Temporarily honor per-song family via global openFonts path.
-	prev := a.state.Settings.FontFamily
-	if m.FontFamily != "" {
-		a.state.Settings.FontFamily = m.FontFamily
-	}
-	a.applySongFontFromSettings(a.song.ID)
-	a.state.Settings.FontFamily = prev
-	a.status = "Song font family updated"
-}
-
 func (a *app) resetSongMetaFont() {
 	m := a.state.Settings.SongMeta(a.song.ID)
 	m.FontFamily = ""
@@ -1000,7 +938,31 @@ func (a *app) setTab(t tab) {
 	if t >= tabCount {
 		t = tabCount - 1
 	}
+	if t == tabMenu {
+		// On song detail, Menu opens the song-specific menu — not the app menu.
+		if a.screen == screenSong || a.screen == screenSongMenu || a.screen == screenEditSong {
+			a.openSongMenu()
+			return
+		}
+		// Menu tab opens native OpenMenu; keep previous tab content underneath.
+		if a.tab != tabMenu {
+			a.menuReturn = a.tab
+		}
+		if a.menuReturn == tabMenu {
+			a.menuReturn = tabSongs
+		}
+		a.tab = a.menuReturn
+		a.screen = screenList
+		a.ctxTitle = ""
+		a.refreshList()
+		a.sel = 0
+		a.scroll = 0
+		a.status = fmt.Sprintf("%d songs", a.state.Lib.SongCount())
+		a.openAppMenu()
+		return
+	}
 	a.tab = t
+	a.menuReturn = t
 	a.screen = screenList
 	a.ctxTitle = ""
 	a.refreshList()

@@ -6,24 +6,30 @@ import (
 	"github.com/michael/songbook/internal/songbook"
 )
 
+type appMenuKind int
+
+const (
+	menuKindMain appMenuKind = iota
+	menuKindSort
+	menuKindListFont
+	menuKindSongFont
+	menuKindFont
+	menuKindChords
+	menuKindSongMenu
+	menuKindSongMetaFontSize
+	menuKindSongMetaFontFamily
+)
+
 func (a *app) menuLabels() []string {
 	s := a.state.Settings
-	font := "default"
-	if s.FontFamily == "mono" {
-		font = "mono"
-	}
-	chords := string(s.ChordHighlight)
-	if s.ChordColor != "" {
-		chords += "/" + string(s.ChordColor)
-	}
 	return []string{
 		"Import library…",
 		"Random song",
 		"Sort: " + sortLabel(s.Sort),
 		"List font: " + string(s.ListFontSize),
 		"Song font: " + string(s.SongFontSize),
-		"Font: " + font,
-		"Chords: " + chords,
+		"Font: " + fontFamilyLabel(s.FontFamily),
+		"Chords: " + chordStyleLabel(s.ChordHighlight, s.ChordColor),
 	}
 }
 
@@ -40,26 +46,185 @@ func sortLabel(m songbook.SortMode) string {
 	}
 }
 
-func (a *app) runMenuAction(i int) {
-	labels := a.menuLabels()
-	if i < 0 || i >= len(labels) {
-		return
+func fontFamilyLabel(fam string) string {
+	if fam == "mono" {
+		return "mono"
 	}
+	return "default"
+}
+
+func chordStyleLabel(h songbook.ChordHighlightStyle, c songbook.ChordColor) string {
+	if h == songbook.ChordHighlightOff {
+		return "off"
+	}
+	if c == "" {
+		return "bold"
+	}
+	return "bold/" + string(c)
+}
+
+func sortChoices() []songbook.SortMode {
+	return []songbook.SortMode{
+		songbook.SortByAuthorName,
+		songbook.SortBySongName,
+		songbook.SortByUpdated,
+		songbook.SortByCreated,
+	}
+}
+
+func sortChoiceLabels() []string {
+	out := make([]string, 0, 4)
+	for _, m := range sortChoices() {
+		out = append(out, sortLabel(m))
+	}
+	return out
+}
+
+func fontSizeChoices() []songbook.FontSizeStep {
+	return []songbook.FontSizeStep{
+		songbook.FontSmallest,
+		songbook.FontSmall,
+		songbook.FontMedium,
+		songbook.FontBig,
+		songbook.FontBigger,
+	}
+}
+
+func fontSizeChoiceLabels() []string {
+	out := make([]string, 0, 5)
+	for _, s := range fontSizeChoices() {
+		out = append(out, string(s))
+	}
+	return out
+}
+
+func fontFamilyChoices() []string {
+	return []string{"", "mono"}
+}
+
+func fontFamilyChoiceLabels() []string {
+	return []string{"default", "mono"}
+}
+
+type chordChoice struct {
+	h songbook.ChordHighlightStyle
+	c songbook.ChordColor
+}
+
+func chordChoices() []chordChoice {
+	return []chordChoice{
+		{songbook.ChordHighlightBold, songbook.ChordColorDefault},
+		{songbook.ChordHighlightBold, songbook.ChordColorYellow},
+		{songbook.ChordHighlightBold, songbook.ChordColorGreen},
+		{songbook.ChordHighlightBold, songbook.ChordColorRed},
+		{songbook.ChordHighlightOff, songbook.ChordColorDefault},
+	}
+}
+
+func chordChoiceLabels() []string {
+	out := make([]string, 0, 5)
+	for _, p := range chordChoices() {
+		out = append(out, chordStyleLabel(p.h, p.c))
+	}
+	return out
+}
+
+func indexOfSort(cur songbook.SortMode) int {
+	for i, m := range sortChoices() {
+		if m == cur {
+			return i
+		}
+	}
+	return 0
+}
+
+func indexOfFontSize(cur songbook.FontSizeStep) int {
+	for i, s := range fontSizeChoices() {
+		if s == cur {
+			return i
+		}
+	}
+	return 2
+}
+
+func indexOfFontFamily(cur string) int {
+	if cur == "mono" {
+		return 1
+	}
+	return 0
+}
+
+func indexOfChord(h songbook.ChordHighlightStyle, c songbook.ChordColor) int {
+	for i, p := range chordChoices() {
+		if p.h == h && p.c == c {
+			return i
+		}
+	}
+	return 0
+}
+
+func (a *app) runMainMenuAction(i int) {
 	switch i {
 	case 0:
 		a.promptImportFilename()
+		inkRepaint()
 	case 1:
 		a.openRandomSong()
+		inkRepaint()
 	case 2:
-		a.cycleSort()
+		a.openSettingMenu(menuKindSort, "Sort", sortChoiceLabels(), indexOfSort(a.state.Settings.Sort))
 	case 3:
-		a.cycleListFont()
+		a.openSettingMenu(menuKindListFont, "List font", fontSizeChoiceLabels(), indexOfFontSize(a.state.Settings.ListFontSize))
 	case 4:
-		a.cycleSongFont()
+		a.openSettingMenu(menuKindSongFont, "Song font", fontSizeChoiceLabels(), indexOfFontSize(a.state.Settings.SongFontSize))
 	case 5:
-		a.cycleFontFamily()
+		a.openSettingMenu(menuKindFont, "Font", fontFamilyChoiceLabels(), indexOfFontFamily(a.state.Settings.FontFamily))
 	case 6:
-		a.cycleChordStyle()
+		a.openSettingMenu(menuKindChords, "Chords", chordChoiceLabels(), indexOfChord(a.state.Settings.ChordHighlight, a.state.Settings.ChordColor))
+	}
+}
+
+func (a *app) applySettingChoice(kind appMenuKind, i int) {
+	switch kind {
+	case menuKindSort:
+		choices := sortChoices()
+		if i < 0 || i >= len(choices) {
+			return
+		}
+		a.state.Settings.Sort = choices[i]
+		a.persistSettings()
+		a.refreshList()
+	case menuKindListFont:
+		choices := fontSizeChoices()
+		if i < 0 || i >= len(choices) {
+			return
+		}
+		a.state.Settings.ListFontSize = choices[i]
+		a.persistSettings()
+		a.applyListFontFromSettings()
+	case menuKindSongFont:
+		choices := fontSizeChoices()
+		if i < 0 || i >= len(choices) {
+			return
+		}
+		a.state.Settings.SongFontSize = choices[i]
+		a.persistSettings()
+	case menuKindFont:
+		choices := fontFamilyChoices()
+		if i < 0 || i >= len(choices) {
+			return
+		}
+		a.state.Settings.FontFamily = choices[i]
+		a.persistSettings()
+		a.applyListFontFromSettings()
+	case menuKindChords:
+		choices := chordChoices()
+		if i < 0 || i >= len(choices) {
+			return
+		}
+		a.state.Settings.ChordHighlight = choices[i].h
+		a.state.Settings.ChordColor = choices[i].c
+		a.persistSettings()
 	}
 }
 
@@ -71,84 +236,91 @@ func (a *app) persistSettings() {
 	a.status = "Settings saved"
 }
 
-func (a *app) cycleSort() {
-	order := []songbook.SortMode{
-		songbook.SortByAuthorName,
-		songbook.SortBySongName,
-		songbook.SortByUpdated,
-		songbook.SortByCreated,
-	}
-	cur := a.state.Settings.Sort
-	next := order[0]
-	for i, m := range order {
-		if m == cur {
-			next = order[(i+1)%len(order)]
-			break
-		}
-	}
-	a.state.Settings.Sort = next
-	a.persistSettings()
-	a.refreshList()
+// runMenuAction keeps the old list-UI path working if Menu rows are shown.
+func (a *app) runMenuAction(i int) {
+	a.runMainMenuAction(i)
 }
 
-func (a *app) cycleListFont() {
-	a.state.Settings.ListFontSize = nextFontSize(a.state.Settings.ListFontSize)
-	a.persistSettings()
-	a.applyListFontFromSettings()
+func (a *app) songMenuLabels() []string {
+	sz := a.songMetaFontSize()
+	fam := a.songMetaFontFamily()
+	return []string{
+		"Transpose up",
+		"Transpose down",
+		"Save transposed",
+		"Edit song…",
+		"Song font size: " + string(sz),
+		"Song font family: " + fontFamilyLabel(fam),
+		"Reset song font",
+	}
 }
 
-func (a *app) cycleSongFont() {
-	a.state.Settings.SongFontSize = nextFontSize(a.state.Settings.SongFontSize)
-	a.persistSettings()
-}
-
-func (a *app) cycleFontFamily() {
-	if a.state.Settings.FontFamily == "mono" {
-		a.state.Settings.FontFamily = ""
-	} else {
-		a.state.Settings.FontFamily = "mono"
+func (a *app) songMetaFontSize() songbook.FontSizeStep {
+	m := a.state.Settings.SongMeta(a.song.ID)
+	if m.FontSize != "" {
+		return m.FontSize
 	}
-	a.persistSettings()
-	a.applyListFontFromSettings()
-}
-
-func (a *app) cycleChordStyle() {
-	s := &a.state.Settings
-	type pair struct {
-		h songbook.ChordHighlightStyle
-		c songbook.ChordColor
-	}
-	seq := []pair{
-		{songbook.ChordHighlightBold, songbook.ChordColorDefault},
-		{songbook.ChordHighlightBold, songbook.ChordColorYellow},
-		{songbook.ChordHighlightBold, songbook.ChordColorGreen},
-		{songbook.ChordHighlightBold, songbook.ChordColorRed},
-		{songbook.ChordHighlightOff, songbook.ChordColorDefault},
-	}
-	next := seq[0]
-	for i, p := range seq {
-		if p.h == s.ChordHighlight && p.c == s.ChordColor {
-			next = seq[(i+1)%len(seq)]
-			break
-		}
-	}
-	s.ChordHighlight = next.h
-	s.ChordColor = next.c
-	a.persistSettings()
-}
-
-func nextFontSize(cur songbook.FontSizeStep) songbook.FontSizeStep {
-	order := []songbook.FontSizeStep{
-		songbook.FontSmallest,
-		songbook.FontSmall,
-		songbook.FontMedium,
-		songbook.FontBig,
-		songbook.FontBigger,
-	}
-	for i, s := range order {
-		if s == cur {
-			return order[(i+1)%len(order)]
-		}
+	if a.state.Settings.SongFontSize != "" {
+		return a.state.Settings.SongFontSize
 	}
 	return songbook.FontMedium
+}
+
+func (a *app) songMetaFontFamily() string {
+	m := a.state.Settings.SongMeta(a.song.ID)
+	if m.FontFamily != "" {
+		return m.FontFamily
+	}
+	return a.state.Settings.FontFamily
+}
+
+func (a *app) runSongOpenMenuAction(i int) {
+	switch i {
+	case 0:
+		a.changeTranspose(1)
+		inkRepaint()
+	case 1:
+		a.changeTranspose(-1)
+		inkRepaint()
+	case 2:
+		a.saveTransposed()
+		inkRepaint()
+	case 3:
+		a.startEditSong()
+		inkRepaint()
+	case 4:
+		a.openSettingMenu(menuKindSongMetaFontSize, "Song font size", fontSizeChoiceLabels(), indexOfFontSize(a.songMetaFontSize()))
+	case 5:
+		a.openSettingMenu(menuKindSongMetaFontFamily, "Song font family", fontFamilyChoiceLabels(), indexOfFontFamily(a.songMetaFontFamily()))
+	case 6:
+		a.resetSongMetaFont()
+		inkRepaint()
+	}
+}
+
+func (a *app) applySongMetaChoice(kind appMenuKind, i int) {
+	m := a.state.Settings.SongMeta(a.song.ID)
+	switch kind {
+	case menuKindSongMetaFontSize:
+		choices := fontSizeChoices()
+		if i < 0 || i >= len(choices) {
+			return
+		}
+		m.FontSize = choices[i]
+	case menuKindSongMetaFontFamily:
+		choices := fontFamilyChoices()
+		if i < 0 || i >= len(choices) {
+			return
+		}
+		m.FontFamily = choices[i]
+	default:
+		return
+	}
+	if a.state.Settings.Songs == nil {
+		a.state.Settings.Songs = map[string]songbook.SongMeta{}
+	}
+	a.state.Settings.Songs[a.song.ID] = m
+	_ = a.state.saveSettings()
+	a.applySongFontFromSettings(a.song.ID)
+	a.status = "Song font updated"
 }
