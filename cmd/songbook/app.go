@@ -119,7 +119,7 @@ func (a *app) Init() error {
 	// Keep portrait so framebuffer Y grows downward on the physical screen.
 	ink.SetDefaultOrientation(ink.Orientation0)
 	ink.SetOrientation(ink.Orientation0)
-	setPanelType(0) // fullscreen; we draw our own top tabs
+	enableSystemPanel() // clock/wifi/battery; no FB offset (see panel.go)
 	a.openFonts()
 	ink.SetKeyboardHandler(a.onKeyboard)
 	if err := a.state.load(); err != nil {
@@ -161,11 +161,12 @@ func (a *app) applySongFontFromSettings(songID string) {
 	a.state.Settings.FontFamily = prevFamily
 }
 
-// layout returns screen size and vertical bands: tabs | header | content.
-// Panel is disabled in Init (setPanelType(0)), so Y starts at 0.
+// layout returns screen size and vertical bands below the system panel:
+// tabs | header | content.
 func (a *app) layout() (sz image.Point, tabs, header, content image.Rectangle) {
 	sz = ink.ScreenSize()
-	tabs = image.Rect(0, 0, sz.X, tabH)
+	top := appChromeTop()
+	tabs = image.Rect(0, top, sz.X, top+tabH)
 	header = image.Rect(0, tabs.Max.Y, sz.X, tabs.Max.Y+headerH)
 	content = image.Rect(0, header.Max.Y, sz.X, sz.Y)
 	return sz, tabs, header, content
@@ -250,6 +251,8 @@ func (a *app) Draw() {
 	default:
 		a.drawMain(header, content)
 	}
+	// Panel last so it owns 0..PanelHeight exclusively (no race with tab bar).
+	ink.DrawTopPanel()
 	ink.FullUpdate()
 }
 
@@ -477,18 +480,38 @@ func (a *app) setSongLineStyle(kind songbook.LineKind) {
 }
 
 func (a *app) drawTabs(r image.Rectangle) {
-	ink.DrawLine(image.Pt(r.Min.X, r.Min.Y), image.Pt(r.Max.X, r.Min.Y), ink.Black)
-	labels := []string{"Search", "Songs", "Authors", "Lists", "Menu"}
-	w := r.Dx() / len(labels)
+	labels := []string{" Search", " Songs", " Authors", " Playlists", " Menu"}
+	n := len(labels)
+	w := r.Dx() / n
 	a.font.SetActive(ink.Black)
+
+	// Fill bar white so panel/content don't bleed through.
+	ink.FillArea(r, ink.White)
+
 	for i, lab := range labels {
 		x0 := r.Min.X + i*w
-		cell := image.Rect(x0, r.Min.Y, x0+w, r.Max.Y)
-		if tab(i) == a.tab && a.screen != screenSong {
-			ink.FillArea(cell, ink.LightGray)
+		x1 := x0 + w
+		if i == n-1 {
+			x1 = r.Max.X
 		}
-		ink.DrawString(image.Pt(x0+6, r.Min.Y+(r.Dy()-a.fontSize)/2), lab)
+		// Inset 1px for top/bottom rules so the selection box sits between them.
+		cell := image.Rect(x0, r.Min.Y+1, x1, r.Max.Y-1)
+		selected := tab(i) == a.tab && a.screen != screenSong && a.screen != screenSongMenu && a.screen != screenEditSong
+		if selected {
+			ink.FillArea(cell, ink.LightGray)
+			ink.DrawRect(cell, ink.Black)
+		}
+		ink.DrawString(image.Pt(x0+6, cell.Min.Y+(cell.Dy()-a.fontSize)/2), lab)
+
+		// Vertical divider between items (PocketBook-style hairline).
+		if i > 0 {
+			ink.DrawLine(image.Pt(x0, r.Min.Y+4), image.Pt(x0, r.Max.Y-5), ink.DarkGray)
+		}
 	}
+
+	// Hairlines separating the bar from the system panel above and content below.
+	ink.DrawLine(image.Pt(r.Min.X, r.Min.Y), image.Pt(r.Max.X, r.Min.Y), ink.DarkGray)
+	ink.DrawLine(image.Pt(r.Min.X, r.Max.Y-1), image.Pt(r.Max.X, r.Max.Y-1), ink.DarkGray)
 }
 
 func (a *app) Key(e ink.KeyEvent) bool {
