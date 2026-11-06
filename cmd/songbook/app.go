@@ -260,12 +260,11 @@ func (a *app) refreshList() {
 	case screenList:
 		switch a.tab {
 		case tabSearch:
-			if a.filter == "" {
+			q, fulltext := songbook.ParseSearchQuery(a.filter)
+			if q == "" {
 				a.songs = nil
 			} else {
-				a.songs = lib.Search(a.filter, songbook.SearchOptions{
-					Fulltext: a.state.Settings.SearchFulltext,
-				})
+				a.songs = lib.Search(q, songbook.SearchOptions{Fulltext: fulltext})
 			}
 		case tabSongs:
 			a.songs = lib.SongsSorted(a.state.Settings.Sort, a.state.Settings.Songs)
@@ -622,21 +621,11 @@ func (a *app) openSearch() {
 	a.tab = tabSearch
 	a.ctxTitle = ""
 	a.refreshList()
+	a.kbMode = kbSearch
 	ink.OpenKeyboard(a.filter, 128)
 }
 
 // openSongMenu is implemented in openmenu.go (native OpenMenu).
-
-func (a *app) toggleFulltextSearch() {
-	a.state.Settings.SearchFulltext = !a.state.Settings.SearchFulltext
-	_ = a.state.saveSettings()
-	a.refreshList()
-	if a.state.Settings.SearchFulltext {
-		a.status = "Fulltext search on"
-	} else {
-		a.status = "Fulltext search off"
-	}
-}
 
 func (a *app) Pointer(e ink.PointerEvent) bool {
 	if e.State != ink.PointerUp && e.State != ink.PointerDown {
@@ -1039,6 +1028,7 @@ func (a *app) setTab(t tab) {
 	a.scroll = 0
 	a.status = fmt.Sprintf("%d songs", a.state.Lib.SongCount())
 	if t == tabSearch {
+		a.kbMode = kbSearch
 		ink.OpenKeyboard(a.filter, 128)
 	}
 }

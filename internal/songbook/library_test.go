@@ -114,6 +114,47 @@ func TestSearchFulltext(t *testing.T) {
 	}
 }
 
+func TestParseSearchQuery(t *testing.T) {
+	q, ft := songbook.ParseSearchQuery("  wabi  ")
+	if q != "wabi" || ft {
+		t.Fatalf("got %q %v, want wabi false", q, ft)
+	}
+	q, ft = songbook.ParseSearchQuery("#neuroním")
+	if q != "neuroním" || !ft {
+		t.Fatalf("got %q %v, want neuroním true", q, ft)
+	}
+	q, ft = songbook.ParseSearchQuery("@foo")
+	if q != "foo" || !ft {
+		t.Fatalf("got %q %v", q, ft)
+	}
+	q, ft = songbook.ParseSearchQuery("?")
+	if q != "" || !ft {
+		t.Fatalf("bare prefix: got %q %v", q, ft)
+	}
+	for _, p := range []string{"#", "@", "*", "~", "!", "%", "$", ".", ":", "/", "?"} {
+		_, ft := songbook.ParseSearchQuery(p + "x")
+		if !ft {
+			t.Fatalf("prefix %q should enable fulltext", p)
+		}
+	}
+}
+
+func TestSearchPrefixFulltext(t *testing.T) {
+	lib, err := songbook.LoadFile(testExportPath(t))
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	raw := "#neuroním"
+	q, ft := songbook.ParseSearchQuery(raw)
+	if !ft {
+		t.Fatal("expected fulltext")
+	}
+	hits := lib.Search(q, songbook.SearchOptions{Fulltext: ft})
+	if len(hits) == 0 {
+		t.Fatal("expected fulltext hit via prefix")
+	}
+}
+
 func TestSongsSortedByTitle(t *testing.T) {
 	lib := songbook.NewEmpty()
 	_ = lib.Upsert(songbook.Song{ID: "1", Title: "Zebra", Author: "A"})

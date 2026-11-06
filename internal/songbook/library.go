@@ -7,6 +7,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 // Song is one Zpěvník song entry.
@@ -218,6 +219,24 @@ func (l *Library) SongsByAuthor(author string) []Song {
 // SearchOptions controls Search behavior.
 type SearchOptions struct {
 	Fulltext bool // also match songtext
+}
+
+// FulltextSearchPrefixes mark a query as song-text search when used as the first rune.
+// Example: "#neuroním" searches lyrics; "wabi" searches title/author only.
+const FulltextSearchPrefixes = "#@*~!%$.:/?"
+
+// ParseSearchQuery trims raw input and detects a leading fulltext prefix symbol.
+// The prefix is stripped from the returned query.
+func ParseSearchQuery(raw string) (query string, fulltext bool) {
+	q := strings.TrimSpace(raw)
+	if q == "" {
+		return "", false
+	}
+	r, size := utf8.DecodeRuneInString(q)
+	if size > 0 && strings.ContainsRune(FulltextSearchPrefixes, r) {
+		return strings.TrimSpace(q[size:]), true
+	}
+	return q, false
 }
 
 // Search filters songs by title or author (diacritics-insensitive).
