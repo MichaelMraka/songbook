@@ -78,7 +78,8 @@ type app struct {
 	screen screen
 	tab    tab
 
-	filter string
+	filter     string // active search query (results)
+	lastSearch string // last non-empty query; keyboard prefill survives cancel/clear
 	songs  []songbook.Song // current list content
 	scroll int
 	sel    int
@@ -127,7 +128,6 @@ func (a *app) Init() error {
 	enableSystemPanel() // clock/wifi/battery; no FB offset (see panel.go)
 	a.openUIFont()
 	a.openFonts()
-	ink.SetKeyboardHandler(a.onKeyboard)
 	if err := a.state.load(); err != nil {
 		a.status = "No library. Place XML at " + a.state.LibraryPath + " or tap Import."
 		// settings may still have loaded; library empty
@@ -634,7 +634,7 @@ func (a *app) openSearch() {
 	a.ctxTitle = ""
 	a.refreshList()
 	a.kbMode = kbSearch
-	ink.OpenKeyboard(a.filter, 128)
+	openKeyboard("Search", a.searchPrefill(), 128)
 }
 
 // openSongMenu is implemented in openmenu.go (native OpenMenu).
@@ -712,11 +712,22 @@ func (a *app) onKeyboard(text string) {
 		a.screen = screenEditSong
 	default:
 		a.filter = strings.TrimSpace(text)
+		if a.filter != "" {
+			a.lastSearch = a.filter
+		}
 		a.screen = screenList
 		a.tab = tabSearch
 		a.refreshList()
 	}
 	ink.Repaint()
+}
+
+// searchPrefill is the text shown in the search keyboard (active query, else last).
+func (a *app) searchPrefill() string {
+	if a.filter != "" {
+		return a.filter
+	}
+	return a.lastSearch
 }
 
 func (a *app) listLen() int {
@@ -873,13 +884,13 @@ func (a *app) runEditSongAction(i int) {
 	switch editSongActions[i] {
 	case "Edit author":
 		a.kbMode = kbEditAuthor
-		ink.OpenKeyboard(a.song.Author, 256)
+		openKeyboard("Author", a.song.Author, 256)
 	case "Edit title":
 		a.kbMode = kbEditTitle
-		ink.OpenKeyboard(a.song.Title, 256)
+		openKeyboard("Title", a.song.Title, 256)
 	case "Edit song text":
 		a.kbMode = kbEditText
-		ink.OpenKeyboard(a.song.Text, 16384)
+		openKeyboard("Song text", a.song.Text, 16384)
 	case "Done":
 		a.screen = screenSong
 		a.rebuildSongLines()
@@ -1061,7 +1072,7 @@ func (a *app) setTab(t tab) {
 	a.status = fmt.Sprintf("%d songs", a.state.Lib.SongCount())
 	if t == tabSearch {
 		a.kbMode = kbSearch
-		ink.OpenKeyboard(a.filter, 128)
+		openKeyboard("Search", a.searchPrefill(), 128)
 	}
 }
 
