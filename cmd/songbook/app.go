@@ -308,8 +308,14 @@ func (a *app) drawMain(_, list image.Rectangle) {
 	rowH := a.fontSize + 12
 	visible := max(1, list.Dy()/rowH)
 	switch a.tab {
-	case tabSearch, tabSongs:
-		a.drawSongRows(list, rowH, visible, a.songs)
+	case tabSearch:
+		empty := "(empty)"
+		if q, _ := songbook.ParseSearchQuery(a.filter); q == "" {
+			empty = searchEmptyHint
+		}
+		a.drawSongRows(list, rowH, visible, a.songs, empty)
+	case tabSongs:
+		a.drawSongRows(list, rowH, visible, a.songs, "(empty)")
 	case tabAuthors:
 		a.drawAuthorRows(list, rowH, visible)
 	case tabPlaylists:
@@ -358,15 +364,17 @@ func (a *app) drawStringRows(list image.Rectangle, rowH, visible int, items []st
 func (a *app) drawSongList(_, list image.Rectangle, _ string) {
 	rowH := a.fontSize + 12
 	visible := max(1, list.Dy()/rowH)
-	a.drawSongRows(list, rowH, visible, a.songs)
+	a.drawSongRows(list, rowH, visible, a.songs, "(empty)")
 }
 
-func (a *app) drawSongRows(list image.Rectangle, rowH, visible int, songs []songbook.Song) {
+const searchEmptyHint = "Search title and author. Use #text to search lyrics."
+
+func (a *app) drawSongRows(list image.Rectangle, rowH, visible int, songs []songbook.Song, emptyLabel string) {
 	a.font.SetActive(ink.Black)
 	ink.SetClip(list)
 	defer ink.SetClip(ink.Screen())
 	if len(songs) == 0 {
-		ink.DrawString(image.Pt(12, list.Min.Y+2), "(empty)")
+		ink.DrawString(image.Pt(12, list.Min.Y+2), truncate(emptyLabel, list.Dx()-24))
 		return
 	}
 	if a.sel < a.scroll {
@@ -606,9 +614,7 @@ func (a *app) Key(e ink.KeyEvent) bool {
 			return true
 		}
 	case ink.KeyMenu:
-		if a.screen == screenSong {
-			a.openSongMenu()
-		} else if a.screen == screenSongMenu || a.screen == screenEditSong {
+		if a.screen == screenSongMenu || a.screen == screenEditSong {
 			a.screen = screenSong
 			ink.Repaint()
 		} else {
@@ -620,6 +626,9 @@ func (a *app) Key(e ink.KeyEvent) bool {
 }
 
 func (a *app) openSearch() {
+	if a.leavingSongView() {
+		a.applyListFontFromSettings()
+	}
 	a.screen = screenList
 	a.tab = tabSearch
 	a.ctxTitle = ""
