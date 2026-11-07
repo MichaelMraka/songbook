@@ -18,6 +18,7 @@ const (
 	menuKindSongMenu
 	menuKindSongMetaFontSize
 	menuKindSongMetaFontFamily
+	menuKindBrowse
 )
 
 func (a *app) menuLabels() []string {

@@ -3,7 +3,6 @@
 package main
 
 import (
-	"image"
 	"path/filepath"
 
 	ink "github.com/dennwc/inkview"
@@ -12,9 +11,10 @@ import (
 )
 
 func (a *app) openImportBrowser() {
+	a.pendingImportPath = ""
 	a.browsePath = ink.FlashDir
 	a.reloadBrowseEntries()
-	a.showBrowseList(0)
+	a.showBrowseMenu()
 }
 
 func (a *app) reloadBrowseEntries() {
@@ -25,55 +25,50 @@ func (a *app) reloadBrowseEntries() {
 		a.browseEntries = nil
 		return
 	}
+	var rows []songbook.DirEntry
 	root := ink.FlashDir
 	if a.browsePath != root && a.browsePath != "/" {
-		parent := songbook.DirEntry{
+		rows = append(rows, songbook.DirEntry{
 			Name:  "..",
 			Path:  filepath.Clean(filepath.Join(a.browsePath, "..")),
 			IsDir: true,
-		}
-		a.browseEntries = append([]songbook.DirEntry{parent}, ents...)
-	} else {
-		a.browseEntries = ents
+		})
 	}
+	a.browseEntries = append(rows, ents...)
 }
 
-func (a *app) showBrowseList(cpos int) {
-	a.activateUIFont()
-	n := len(a.browseEntries)
-	itemH := uiFontSize + 16
-	sz := ink.ScreenSize()
-	title := "Import: " + a.browsePath
-	openNativeList(title, sz.X, itemH, n, cpos)
-}
-
-func (a *app) onBrowseList(action, x, y, idx, state int) int {
-	switch action {
-	case listPaint:
-		if idx < 0 || idx >= len(a.browseEntries) {
-			return 0
-		}
-		a.activateUIFont()
-		itemH := uiFontSize + 16
-		ink.DrawString(image.Pt(x+8, y+(itemH-uiFontSize)/2), songbook.EntryLabel(a.browseEntries[idx]))
-		return 0
-	case listOpen:
-		if idx < 0 || idx >= len(a.browseEntries) {
-			return 0
-		}
-		e := a.browseEntries[idx]
-		if e.IsDir {
-			a.browsePath = e.Path
-			a.reloadBrowseEntries()
-			a.showBrowseList(0)
-			return 0
-		}
-		a.pendingImportPath = e.Path
-		a.promptImportMode()
-		return 0
-	case listExit:
+func (a *app) showBrowseMenu() {
+	if len(a.browseEntries) == 0 {
+		ink.Message(ink.Warning, "Import", "No files here", 0)
 		ink.Repaint()
-		return 0
+		return
 	}
-	return 0
+	labels := make([]string, len(a.browseEntries))
+	for i, e := range a.browseEntries {
+		labels[i] = songbook.EntryLabel(e)
+	}
+	// Short title; full path can be long on device menus.
+	title := "Import: " + filepath.Base(a.browsePath)
+	if a.browsePath == ink.FlashDir || a.browsePath == "/" {
+		title = "Import"
+	}
+	a.openSettingMenu(menuKindBrowse, title, labels, -1)
+}
+
+func (a *app) onBrowseMenu(i int) {
+	if i < 0 || i >= len(a.browseEntries) {
+		a.browseEntries = nil
+		ink.Repaint()
+		return
+	}
+	e := a.browseEntries[i]
+	if e.IsDir {
+		a.browsePath = e.Path
+		a.reloadBrowseEntries()
+		a.showBrowseMenu()
+		return
+	}
+	a.pendingImportPath = e.Path
+	a.browseEntries = nil
+	a.promptImportMode()
 }

@@ -146,6 +146,15 @@ func (a *app) onAppMenu(index int) {
 		}
 		a.openSongMenu()
 
+	case menuKindBrowse:
+		if index <= 0 {
+			a.browseEntries = nil
+			a.pendingImportPath = ""
+			ink.Repaint()
+			return
+		}
+		a.onBrowseMenu(index - 1)
+
 	default:
 		ink.Repaint()
 	}

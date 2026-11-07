@@ -102,8 +102,8 @@ type app struct {
 
 	kbMode            keyboardMode
 	pendingImportPath string
-	browsePath        string
-	browseEntries     []songbook.DirEntry
+	browsePath    string
+	browseEntries []songbook.DirEntry
 
 	menuReturn tab         // tab shown under / after native OpenMenu (Menu is a trigger)
 	menuKind   appMenuKind // main OpenMenu vs a settings submenu
@@ -1075,6 +1075,8 @@ func (a *app) promptImportMode() {
 			a.doImport(true)
 		} else if button == 2 {
 			a.doImport(false)
+		} else {
+			a.pendingImportPath = ""
 		}
 		ink.Repaint()
 	})
