@@ -7,8 +7,6 @@ import (
 	"image"
 	"image/color"
 	"math/rand"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -41,7 +39,6 @@ type keyboardMode int
 
 const (
 	kbSearch keyboardMode = iota
-	kbImportFile
 	kbEditAuthor
 	kbEditTitle
 	kbEditText
@@ -105,6 +102,8 @@ type app struct {
 
 	kbMode            keyboardMode
 	pendingImportPath string
+	browsePath        string
+	browseEntries     []songbook.DirEntry
 
 	menuReturn tab         // tab shown under / after native OpenMenu (Menu is a trigger)
 	menuKind   appMenuKind // main OpenMenu vs a settings submenu
@@ -688,8 +687,6 @@ func (a *app) onKeyboard(text string) {
 	mode := a.kbMode
 	a.kbMode = kbSearch
 	switch mode {
-	case kbImportFile:
-		a.onImportFilename(strings.TrimSpace(text))
 	case kbEditAuthor:
 		a.song.Author = strings.TrimSpace(text)
 		a.saveSongEdits()
@@ -1060,26 +1057,7 @@ func (a *app) setTab(t tab) {
 }
 
 func (a *app) promptImportFilename() {
-	a.kbMode = kbImportFile
-	ink.OpenKeyboard("export.zpk.xml", 256)
-}
-
-func (a *app) onImportFilename(name string) {
-	if name == "" {
-		a.status = "Import cancelled"
-		return
-	}
-	path := name
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(songbookDir, path)
-	}
-	if st, err := os.Stat(path); err != nil || st.IsDir() {
-		a.status = "File not found: " + path
-		ink.Message(ink.Warning, "Import", a.status, 0)
-		return
-	}
-	a.pendingImportPath = path
-	a.promptImportMode()
+	a.openImportBrowser()
 }
 
 func (a *app) openRandomSong() {
