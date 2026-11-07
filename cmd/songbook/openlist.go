@@ -44,10 +44,16 @@ const (
 	listExit       = 7
 )
 
+var listTitleC *C.char
+
 func openNativeList(title string, itemW, itemH, itemCount, cpos int) {
-	ct := C.CString(title)
-	defer C.free(unsafe.Pointer(ct))
-	C.c_open_list(ct, C.int(itemW), C.int(itemH), C.int(itemCount), C.int(cpos))
+	// Keep title alive for the duration of OpenList (may not copy the string).
+	if listTitleC != nil {
+		C.free(unsafe.Pointer(listTitleC))
+		listTitleC = nil
+	}
+	listTitleC = C.CString(title)
+	C.c_open_list(listTitleC, C.int(itemW), C.int(itemH), C.int(itemCount), C.int(cpos))
 }
 
 //export goListHandler
