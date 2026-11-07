@@ -179,13 +179,20 @@ func (a *app) layout() (sz image.Point, tabs, header, content image.Rectangle) {
 	sz = ink.ScreenSize()
 	top := appChromeTop()
 	tabs = image.Rect(0, top, sz.X, top+tabH)
-	hh := 0
-	if !a.listPage() {
-		hh = headerH
-	}
+	hh := a.contentHeaderHeight()
 	header = image.Rect(0, tabs.Max.Y, sz.X, tabs.Max.Y+hh)
 	content = image.Rect(0, header.Max.Y, sz.X, sz.Y)
 	return sz, tabs, header, content
+}
+
+func (a *app) contentHeaderHeight() int {
+	switch a.screen {
+	case screenList, screenAuthorSongs, screenPlaylistSongs, screenSong:
+		// Lists and song body start under the tab bar (song title scrolls with text).
+		return 0
+	default:
+		return headerH
+	}
 }
 
 func (a *app) listPage() bool {
@@ -442,14 +449,7 @@ func (a *app) drawPlaylistRows(list image.Rectangle, rowH, visible int) {
 	}
 }
 
-func (a *app) drawSong(header, body image.Rectangle) {
-	a.font.SetActive(ink.Black)
-	hdr := a.song.DisplayLabel()
-	step := a.song.Step + a.transpose
-	ink.DrawString(image.Pt(12, header.Min.Y+4), truncate(hdr, header.Dx()-12))
-	ink.DrawString(image.Pt(12, header.Min.Y+4+a.fontSize), fmt.Sprintf("transpose %+d  font %d", step, a.fontSize))
-	ink.DrawLine(image.Pt(0, header.Max.Y-1), image.Pt(header.Max.X, header.Max.Y-1), ink.Black)
-
+func (a *app) drawSong(_, body image.Rectangle) {
 	ink.SetClip(body)
 	defer ink.SetClip(ink.Screen())
 	y := body.Min.Y + 4
@@ -551,18 +551,22 @@ func (a *app) Key(e ink.KeyEvent) bool {
 		ink.Repaint()
 		return true
 	case ink.KeyPrev, ink.KeyPrev2:
-		// Hardware < : page lists; on song view keep line scroll.
+		// Hardware < : page lists; half-page scroll in song view.
 		if a.pagingList() {
 			a.pageSel(-1)
+		} else if a.screen == screenSong {
+			a.pageSong(-1)
 		} else {
 			a.moveSel(-1)
 		}
 		ink.Repaint()
 		return true
 	case ink.KeyNext, ink.KeyNext2:
-		// Hardware > : page lists; on song view keep line scroll.
+		// Hardware > : page lists; half-page scroll in song view.
 		if a.pagingList() {
 			a.pageSel(1)
+		} else if a.screen == screenSong {
+			a.pageSong(1)
 		} else {
 			a.moveSel(1)
 		}
@@ -771,6 +775,21 @@ func (a *app) pageSel(dir int) {
 	a.sel = clamp(a.sel+dir*page, 0, n-1)
 }
 
+func (a *app) songVisibleRows() int {
+	_, _, _, body := a.layout()
+	lineH := a.fontSize + 6
+	return max(1, (body.Dy()-4)/lineH)
+}
+
+// pageSong scrolls the song view by half a screen of lines.
+func (a *app) pageSong(dir int) {
+	if len(a.lines) == 0 {
+		return
+	}
+	half := max(1, a.songVisibleRows()/2)
+	a.songScroll = clamp(a.songScroll+dir*half, 0, max(0, len(a.lines)-1))
+}
+
 func (a *app) activate() {
 	switch a.screen {
 	case screenList:
@@ -881,7 +900,14 @@ func (a *app) openSong(s songbook.Song) {
 }
 
 func (a *app) rebuildSongLines() {
-	a.lines = songbook.Render(a.song.Text, a.song.Step+a.transpose)
+	body := songbook.Render(a.song.Text, a.song.Step+a.transpose)
+	// Author/title scroll with the song (no fixed header status line).
+	head := []songbook.DisplayLine{
+		{Kind: songbook.LineLyric, Text: a.song.Author},
+		{Kind: songbook.LineLyric, Text: a.song.Title},
+		{Kind: songbook.LineLyric, Text: ""},
+	}
+	a.lines = append(head, body...)
 }
 
 func (a *app) changeTranspose(d int) {
