@@ -53,6 +53,7 @@ const (
 	screenSong
 	screenSongMenu
 	screenEditSong
+	screenEditText // line-oriented song text editor
 )
 
 var songMenuActions = []string{
@@ -71,6 +72,15 @@ var editSongActions = []string{
 	"Edit song text",
 	"Done",
 }
+
+// Actions at the top of the line editor list (before lyric rows).
+var editTextActions = []string{
+	"Done",
+	"Insert line below",
+	"Delete line",
+}
+
+const editTextActionCount = 3
 
 type app struct {
 	state *appState
@@ -103,8 +113,11 @@ type app struct {
 
 	kbMode            keyboardMode
 	pendingImportPath string
-	browsePath    string
-	browseEntries []songbook.DirEntry
+	browsePath        string
+	browseEntries     []songbook.DirEntry
+
+	editLines   []string // working copy while on screenEditText
+	editLineIdx int      // line being edited in the keyboard
 
 	menuReturn tab         // tab shown under / after native OpenMenu (Menu is a trigger)
 	menuKind   appMenuKind // main OpenMenu vs a settings submenu
@@ -293,6 +306,8 @@ func (a *app) Draw() {
 		a.drawActionList(header, content, "Song menu", songMenuActions)
 	case screenEditSong:
 		a.drawActionList(header, content, "Edit: "+a.song.Title, editSongActions)
+	case screenEditText:
+		a.drawEditTextList(header, content)
 	case screenAuthorSongs, screenPlaylistSongs:
 		a.drawSongList(header, content, a.ctxTitle)
 	default:
@@ -336,6 +351,41 @@ func (a *app) drawActionList(header, list image.Rectangle, title string, items [
 	rowH := a.fontSize + 12
 	visible := max(1, list.Dy()/rowH)
 	a.drawStringRows(list, rowH, visible, items)
+}
+
+// drawEditTextList uses monospace so spaced chord lines stay column-aligned.
+func (a *app) drawEditTextList(header, list image.Rectangle) {
+	a.font.SetActive(ink.Black)
+	ink.DrawString(image.Pt(12, header.Min.Y+6), "Edit text")
+	ink.DrawLine(image.Pt(0, header.Max.Y-1), image.Pt(header.Max.X, header.Max.Y-1), ink.Black)
+	face := a.mono
+	if face == nil {
+		face = a.font
+	}
+	face.SetActive(ink.Black)
+	rowH := a.fontSize + 12
+	visible := max(1, list.Dy()/rowH)
+	items := a.editTextLabels()
+	ink.SetClip(list)
+	defer ink.SetClip(ink.Screen())
+	if a.sel < a.scroll {
+		a.scroll = a.sel
+	}
+	if a.sel >= a.scroll+visible {
+		a.scroll = a.sel - visible + 1
+	}
+	end := min(len(items), a.scroll+visible)
+	for i := a.scroll; i < end; i++ {
+		y := list.Min.Y + (i-a.scroll)*rowH
+		if y+rowH > list.Max.Y {
+			break
+		}
+		if i == a.sel {
+			ink.FillArea(image.Rect(list.Min.X, y, list.Max.X, min(y+rowH, list.Max.Y)), ink.LightGray)
+		}
+		face.SetActive(ink.Black)
+		ink.DrawString(image.Pt(12, y+2), truncate(items[i], list.Dx()-24))
+	}
 }
 
 func (a *app) drawStringRows(list image.Rectangle, rowH, visible int, items []string) {
@@ -524,7 +574,7 @@ func (a *app) drawTabs(r image.Rectangle) {
 		}
 		// Inset 1px for top/bottom rules so the selection box sits between them.
 		cell := image.Rect(x0, r.Min.Y+1, x1, r.Max.Y-1)
-		selected := tab(i) == a.tab && a.screen != screenSong && a.screen != screenSongMenu && a.screen != screenEditSong
+		selected := tab(i) == a.tab && a.screen != screenSong && a.screen != screenSongMenu && a.screen != screenEditSong && a.screen != screenEditText
 		if selected {
 			ink.FillArea(cell, ink.LightGray)
 			ink.DrawRect(cell, ink.Black)
@@ -617,6 +667,9 @@ func (a *app) Key(e ink.KeyEvent) bool {
 		if a.screen == screenSongMenu || a.screen == screenEditSong {
 			a.screen = screenSong
 			ink.Repaint()
+		} else if a.screen == screenEditText {
+			a.finishEditText(false)
+			ink.Repaint()
 		} else {
 			a.openSearch()
 		}
@@ -667,7 +720,7 @@ func (a *app) Pointer(e ink.PointerEvent) bool {
 		return true
 	}
 	rowH := a.fontSize + 12
-	if a.screen == screenSongMenu || a.screen == screenEditSong {
+	if a.screen == screenSongMenu || a.screen == screenEditSong || a.screen == screenEditText {
 		if e.Y >= list.Min.Y {
 			a.sel = a.scroll + (e.Y-list.Min.Y)/rowH
 			a.activate()
@@ -695,21 +748,27 @@ func (a *app) Orientation(o ink.Orientation) bool {
 func (a *app) onKeyboard(text string) {
 	mode := a.kbMode
 	a.kbMode = kbSearch
+	// Cancel delivers "" and must not wipe author/title/line prefill.
+	cancelled := keyboardCancelled(text)
 	switch mode {
 	case kbEditAuthor:
-		a.song.Author = strings.TrimSpace(text)
-		a.saveSongEdits()
+		if !cancelled {
+			a.song.Author = strings.TrimSpace(text)
+			a.saveSongEdits()
+		}
 		a.screen = screenEditSong
 	case kbEditTitle:
-		a.song.Title = strings.TrimSpace(text)
-		a.saveSongEdits()
+		if !cancelled {
+			a.song.Title = strings.TrimSpace(text)
+			a.saveSongEdits()
+		}
 		a.screen = screenEditSong
 	case kbEditText:
-		// Preserve internal whitespace; only trim outer newlines.
-		a.song.Text = strings.Trim(text, "\r\n")
-		a.saveSongEdits()
-		a.rebuildSongLines()
-		a.screen = screenEditSong
+		if !cancelled && a.editLineIdx >= 0 && a.editLineIdx < len(a.editLines) {
+			// Keep spaces inside the line; strip only CR/LF from the keyboard.
+			a.editLines[a.editLineIdx] = strings.Trim(text, "\r\n")
+		}
+		a.screen = screenEditText
 	default:
 		a.filter = strings.TrimSpace(text)
 		if a.filter != "" {
@@ -738,6 +797,8 @@ func (a *app) listLen() int {
 		return len(songMenuActions)
 	case screenEditSong:
 		return len(editSongActions)
+	case screenEditText:
+		return len(a.editTextLabels())
 	case screenAuthorSongs, screenPlaylistSongs:
 		return len(a.songs)
 	default:
@@ -769,7 +830,7 @@ func (a *app) moveSel(delta int) {
 
 func (a *app) pagingList() bool {
 	switch a.screen {
-	case screenList, screenAuthorSongs, screenPlaylistSongs:
+	case screenList, screenAuthorSongs, screenPlaylistSongs, screenEditText:
 		return true
 	default:
 		return false
@@ -840,6 +901,8 @@ func (a *app) activate() {
 		a.runSongMenuAction(a.sel)
 	case screenEditSong:
 		a.runEditSongAction(a.sel)
+	case screenEditText:
+		a.runEditTextAction(a.sel)
 	case screenAuthorSongs, screenPlaylistSongs:
 		if a.sel >= 0 && a.sel < len(a.songs) {
 			a.openSong(a.songs[a.sel])
@@ -889,12 +952,118 @@ func (a *app) runEditSongAction(i int) {
 		a.kbMode = kbEditTitle
 		openKeyboard("Title", a.song.Title, 256)
 	case "Edit song text":
-		a.kbMode = kbEditText
-		openKeyboard("Song text", a.song.Text, 16384)
+		a.startEditText()
 	case "Done":
 		a.screen = screenSong
 		a.rebuildSongLines()
 	}
+}
+
+func splitSongTextLines(text string) []string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	lines := strings.Split(text, "\n")
+	if len(lines) == 0 {
+		return []string{""}
+	}
+	return lines
+}
+
+func (a *app) startEditText() {
+	a.editLines = splitSongTextLines(a.song.Text)
+	a.sel = editTextActionCount // first lyric line
+	a.scroll = 0
+	a.screen = screenEditText
+}
+
+func (a *app) editTextLabels() []string {
+	out := make([]string, 0, editTextActionCount+len(a.editLines))
+	out = append(out, editTextActions...)
+	for _, line := range a.editLines {
+		if line == "" {
+			out = append(out, "·")
+		} else {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+func (a *app) editTextLineIndex(sel int) int {
+	if sel < editTextActionCount {
+		return -1
+	}
+	return sel - editTextActionCount
+}
+
+func (a *app) runEditTextAction(i int) {
+	if i < 0 {
+		return
+	}
+	if i < editTextActionCount {
+		switch editTextActions[i] {
+		case "Done":
+			a.finishEditText(true)
+		case "Insert line below":
+			a.insertEditLineBelow()
+		case "Delete line":
+			a.deleteEditLine()
+		}
+		return
+	}
+	idx := a.editTextLineIndex(i)
+	if idx < 0 || idx >= len(a.editLines) {
+		return
+	}
+	a.editLineIdx = idx
+	a.kbMode = kbEditText
+	openKeyboard(fmt.Sprintf("Line %d", idx+1), a.editLines[idx], 512)
+}
+
+func (a *app) insertEditLineBelow() {
+	idx := a.editTextLineIndex(a.sel)
+	insertAt := 0
+	if idx >= 0 {
+		insertAt = idx + 1
+	}
+	if insertAt > len(a.editLines) {
+		insertAt = len(a.editLines)
+	}
+	a.editLines = append(a.editLines[:insertAt], append([]string{""}, a.editLines[insertAt:]...)...)
+	a.sel = editTextActionCount + insertAt
+}
+
+func (a *app) deleteEditLine() {
+	idx := a.editTextLineIndex(a.sel)
+	if idx < 0 || idx >= len(a.editLines) {
+		// No lyric line selected — delete nothing.
+		ink.Message(ink.Info, "Edit text", "Select a line to delete.", 0)
+		return
+	}
+	if len(a.editLines) <= 1 {
+		a.editLines[0] = ""
+		a.sel = editTextActionCount
+		return
+	}
+	a.editLines = append(a.editLines[:idx], a.editLines[idx+1:]...)
+	if idx >= len(a.editLines) {
+		idx = len(a.editLines) - 1
+	}
+	a.sel = editTextActionCount + idx
+}
+
+// finishEditText leaves the line editor. When save is true, joins lines into the song and persists.
+func (a *app) finishEditText(save bool) {
+	if save {
+		a.song.Text = strings.Join(a.editLines, "\n")
+		a.saveSongEdits()
+		a.rebuildSongLines()
+	}
+	a.editLines = nil
+	a.editLineIdx = 0
+	a.screen = screenEditSong
+	a.sel = 0
+	a.scroll = 0
 }
 
 func (a *app) saveSongEdits() {
@@ -998,6 +1167,10 @@ func (a *app) resetSongMetaFont() {
 
 func (a *app) goBack() bool {
 	switch a.screen {
+	case screenEditText:
+		a.finishEditText(false)
+		ink.Repaint()
+		return true
 	case screenSongMenu, screenEditSong:
 		a.screen = screenSong
 		ink.Repaint()
@@ -1024,7 +1197,7 @@ func (a *app) switchTab(delta int) {
 }
 
 func (a *app) leavingSongView() bool {
-	return a.screen == screenSong || a.screen == screenSongMenu || a.screen == screenEditSong
+	return a.screen == screenSong || a.screen == screenSongMenu || a.screen == screenEditSong || a.screen == screenEditText
 }
 
 func (a *app) setTab(t tab) {

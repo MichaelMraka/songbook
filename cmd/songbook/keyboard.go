@@ -24,8 +24,9 @@ import "unsafe"
 
 // Keep title + edit buffer alive while the native keyboard is open.
 var (
-	kbTitleC *C.char
-	kbBuf    []byte
+	kbTitleC  *C.char
+	kbBuf     []byte
+	kbPrefill string // text shown when the keyboard opened (for cancel detection)
 )
 
 // openKeyboard shows the PocketBook keyboard with text prefilled for editing.
@@ -38,10 +39,16 @@ func openKeyboard(title, text string, maxlen int) {
 		C.free(unsafe.Pointer(kbTitleC))
 		kbTitleC = nil
 	}
+	kbPrefill = text
 	kbTitleC = C.CString(title)
 	kbBuf = make([]byte, maxlen)
 	copy(kbBuf[:maxlen-1], text) // leaves trailing NUL
 	C.c_open_keyboard(kbTitleC, (*C.char)(unsafe.Pointer(&kbBuf[0])), C.int(maxlen), 0)
+}
+
+// keyboardCancelled reports firmware cancel: handler gets "" while we had prefilled text.
+func keyboardCancelled(text string) bool {
+	return text == "" && kbPrefill != ""
 }
 
 //export goAppKeyboardHandler
