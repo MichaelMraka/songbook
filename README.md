@@ -1,78 +1,82 @@
-# PocketBook Songbook (PB740)
+# PocketBook Songbook
 
-Offline songbook for PocketBook InkPad 3 Pro (**PB740**) compatible with [Karel Hovorka’s Android Songbook](https://play.google.com/store/apps/details?id=eu.karelhovorka.zpevnik&hl=en) XML exports (`InetSongDb` / `.zpk.xml`).
+Offline songbook for the **PocketBook InkPad 3 Pro (PB740)**. It reads libraries exported from the Android app [Songbook (Karel Hovorka)](https://play.google.com/store/apps/details?id=eu.karelhovorka.zpevnik&hl=en) (`InetSongDb` / `.xml`).
 
-## Features (v1)
+Browse by search, song, author, or playlist; open a song with chords above the lyrics; transpose and change fonts on the device—no network required.
 
-- Import Zpěvník XML library
-- **Search / Songs / Authors / Lists / Menu** browsing
-- Offline search (title/author, diacritics-insensitive)
-- Song view with chords above lyrics, transpose, font size, scroll
+![Song view with chords](docs/images/scr0012.jpg)
 
-## Layout
+## Install
 
-| Path | Role |
-|------|------|
-| `internal/songbook` | Pure Go: XML parse, search, chord layout/transpose (host-tested) |
-| `cmd/songbook` | InkView UI (`//go:build pocketbook`) |
-| `test-data/export.zpk.xml` | Sample Android export |
-| `test-data/*.jpg` | Reference screenshots |
-
-## Host tests
-
-```bash
-make test
-# or: go test ./internal/...
-```
-
-## Build for device (Docker/Podman)
-
-Requires Docker or Podman and network to pull the PocketBook Go SDK image:
-
-```bash
-make build
-# produces ./songbook.app (ARM ELF for PB740)
-```
-
-Default image: `docker.io/5keeve/pocketbook-go-sdk:6.3.0-b288-v1` (B288 / PB740). Override with `DOCKER_IMAGE=...` or `CONTAINER=docker|podman`.
-
-## Install on PB740
-
-On the device, internal storage is `/mnt/ext1`. Over USB that same volume appears as the **drive root** (you will see `applications/`, `books/`, … — not a `mnt` or `ext1` folder).
-
-1. Connect the reader over USB.
-2. Copy `songbook.app` into `applications/` on the USB drive.
-3. Create `songbook/` next to `applications/` and copy your export:
+1. Download the latest **`songbook.zip`** from the [Releases](https://github.com/MichaelMraka/songbook/releases/latest) page.
+2. Unzip it. You should get `songbook.app` (and any files included in the release).
+3. Connect the PocketBook over USB. The internal storage appears as the drive root (`applications/`, `books/`, …).
+4. Copy onto the PocketBook:
 
    ```text
    applications/songbook.app
-   songbook/library.xml          # preferred; app reads /mnt/ext1/songbook/library.xml
-   songbook/settings.json        # created automatically (fonts, sort, per-song prefs)
+   songbook/                  ← create this folder for your library
    ```
 
-   Or drop the export as one of `songbook/import.xml`, `songbook/export.zpk.xml`, or `songbook/export.xml`, then use **Menu → Import** (Replace or Merge into `library.xml`).
+5. Eject safely, then open **Applications → songbook** on the reader.
 
-4. Eject/unmount safely, then open **Applications → songbook** on the device.
+To build from source instead, see [Developer docs](docs/DEVELOPMENT.md).
 
-## Controls
+![Applications list](docs/images/scr0008.jpg)
+
+## Import a library
+
+Export your songs from the Android Songbook app, then either:
+
+- Copy the XML into `songbook/library.xml` over USB, or  
+- Put the file somewhere on the device and use **Menu → Import library…** (file browser starting at the USB/flash root). Choose **Replace** or **Merge**.
+
+Settings are stored automatically in `songbook/settings.json`.
+
+## Browse
+
+| Tab | What it does |
+|-----|----------------|
+| **Search** | Type a query. Matches **title and author** by default. Start with `#` (or `@*~!%$.:/?`) to search **lyrics**. |
+| **Songs** | Full library list (sort order from Menu). |
+| **Authors** | Authors with song counts; open one to see their songs. |
+| **Playlists** | Playlists from the imported library. |
+| **Menu** | Import, random song, sort, fonts, chord style. |
+
+![Search](docs/images/scr0009.jpg)
+
+![Songs list](docs/images/scr0010.jpg)
+
+![Authors](docs/images/scr0011.jpg)
+
+![Menu](docs/images/scr0013.jpg)
+
+## Song view
+
+- Chords are shown above the lyrics.
+- **Left / Right** — transpose down / up.  
+- **Minus / Plus** — smaller / larger song font (can be saved per song from the song menu).  
+- **Menu** (hardware) — opens search.  
+- On-screen **Menu** tab while viewing a song — song actions (transpose save, edit, fonts).
+
+## Edit a song
+
+From the song menu: **Edit song…**
+
+- **Author** / **Title** — on-screen keyboard (current value is prefilled; cancel keeps the old text).
+- **Edit song text** — line list: tap a line to edit it, insert/delete lines, **Done** to save. Shown in a monospace font so spaced chord lines stay aligned.
+
+## Controls (summary)
 
 | Action | How |
 |--------|-----|
-| Switch tab | Top tabs or Left/Right (on list) |
-| Move / scroll | Up/Down, or tap list row / song body |
+| Switch tab | Top tabs, or Left/Right on list screens |
+| Move / page | Up/Down; Prev/Next page lists |
 | Open | OK or tap |
 | Back | Back key |
-| Search | Search tab → tap header, or hardware Menu key |
-| Transpose | Left / Right in song view |
-| Font size | Minus / Plus in song view |
-| Import | Menu tab → Import library… |
+| Search | Search tab, or hardware Menu key |
+| Import | Menu → Import library… |
 
-## Device smoke checklist
+## For developers
 
-- [ ] App appears under Applications and launches
-- [ ] Library loads (status shows song count) or empty hint shown
-- [ ] Songs / Authors / Playlists tabs work
-- [ ] Harmonika playlist shows 5 songs
-- [ ] Open a song: chords above lyrics
-- [ ] Transpose and font change redraw correctly
-- [ ] Import from `export.zpk.xml` refreshes the library
+Build, tests, architecture, and device paths: **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**.
